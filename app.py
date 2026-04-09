@@ -50,6 +50,8 @@ def ensure_schema_compatibility():
             conn.execute('ALTER TABLE custom_items ADD COLUMN is_long_term_objective INTEGER DEFAULT 0')
         if 'objective_completed' not in columns:
             conn.execute('ALTER TABLE custom_items ADD COLUMN objective_completed INTEGER DEFAULT 0')
+        if 'is_goal' not in columns:
+            conn.execute('ALTER TABLE custom_items ADD COLUMN is_goal INTEGER DEFAULT 0')
 
         sidebar_columns = {row[1] for row in conn.execute("PRAGMA table_info(sidebar_sections)").fetchall()}
         if 'is_long_term_section' not in sidebar_columns:
@@ -96,6 +98,12 @@ def ensure_schema_compatibility():
             SET is_long_term_section = 1
             WHERE page_key = 'custom_financial_theory'
               AND COALESCE(is_long_term_section, 0) = 0
+        ''')
+        conn.execute('''
+            UPDATE custom_items
+            SET is_goal = 1
+            WHERE COALESCE(is_goal, 0) = 0
+              AND (COALESCE(is_task, 0) = 1 OR COALESCE(is_long_term_objective, 0) = 1)
         ''')
 
         goal_columns = {row[1] for row in conn.execute("PRAGMA table_info(goals)").fetchall()}
@@ -255,8 +263,9 @@ def normalize_custom_payload(data):
         is_task = int(data.get('is_task', 0) or 0)
         is_quick_objective = int(data.get('is_quick_objective', 0) or 0)
         is_long_term_objective = int(data.get('is_long_term_objective', 0) or 0)
+        is_goal = int(data.get('is_goal', 0) or 0)
     except (TypeError, ValueError):
-        return None, api_error('status_id, sort_order, is_task, is_quick_objective, and is_long_term_objective must be integers', 400)
+        return None, api_error('status_id, sort_order, is_task, is_quick_objective, is_long_term_objective, and is_goal must be integers', 400)
 
     task_count = data.get('task_count')
     if task_count in ('', None):
@@ -283,7 +292,8 @@ def normalize_custom_payload(data):
         'task_interval': data.get('task_interval'),
         'subgroup': data.get('subgroup'),
         'is_quick_objective': is_quick_objective,
-        'is_long_term_objective': is_long_term_objective
+        'is_long_term_objective': is_long_term_objective,
+        'is_goal': 1 if (is_goal or is_task or is_long_term_objective) else 0,
     }, None
 
 
@@ -702,17 +712,90 @@ def delete_goal(goal_id):
 
 @app.route('/api/goals/archive', methods=['GET'])
 def get_goals_archive():
-    """Return all goals (active + completed) annotated with term bucket."""
+    """Return all goal-like items (goals, tasks, long-term objectives) with term buckets."""
     from datetime import date as _date
     today = _date.today()
     db = get_db()
-    rows = rows_to_list(db.execute('''
+
+    goal_rows = rows_to_list(db.execute('''
         SELECT g.*, la.name as area_name
         FROM goals g
         JOIN life_areas la ON g.life_area_id = la.id
         ORDER BY la.sort_order, g.priority DESC, g.title
     ''').fetchall())
+
+    task_rows = rows_to_list(db.execute('''
+        SELECT
+            t.id,
+            t.title,
+            t.description,
+            t.due_date AS target_date,
+            t.is_completed,
+            1 AS priority,
+            la.name AS area_name
+        FROM tasks t
+        JOIN life_areas la ON t.life_area_id = la.id
+        ORDER BY la.sort_order, t.title
+    ''').fetchall())
+
+    custom_rows = rows_to_list(db.execute('''
+        SELECT
+            ci.id,
+            ci.name AS title,
+            ci.notes AS description,
+            NULL AS target_date,
+            CASE
+                WHEN COALESCE(ci.is_long_term_objective, 0) = 1 THEN COALESCE(ci.objective_completed, 0)
+                WHEN s.color = 'green' THEN 1
+                ELSE 0
+            END AS is_completed,
+            CASE
+                WHEN COALESCE(ci.is_long_term_objective, 0) = 1 THEN 2
+                WHEN COALESCE(ci.is_task, 0) = 1 THEN 1
+                ELSE 0
+            END AS priority,
+            COALESCE(ss.label, ci.section_key) AS area_name,
+            ci.section_key,
+            COALESCE(ci.is_task, 0) AS is_task,
+            COALESCE(ci.is_long_term_objective, 0) AS is_long_term_objective,
+            COALESCE(ci.is_goal, 0) AS is_goal
+        FROM custom_items ci
+        JOIN statuses s ON ci.status_id = s.id
+        LEFT JOIN sidebar_sections ss ON ss.page_key = ci.section_key
+        WHERE COALESCE(ci.is_goal, 0) = 1
+           OR COALESCE(ci.is_task, 0) = 1
+           OR COALESCE(ci.is_long_term_objective, 0) = 1
+        ORDER BY ci.section_key, ci.sort_order, ci.name
+    ''').fetchall())
+
     db.close()
+
+    rows = []
+    for row in goal_rows:
+        rows.append({
+            'archive_id': f"goal:{row['id']}",
+            'source_type': 'goal',
+            'item_kind': 'goal',
+            'is_goal': 1,
+            **row,
+        })
+
+    for row in task_rows:
+        rows.append({
+            'archive_id': f"task:{row['id']}",
+            'source_type': 'task',
+            'item_kind': 'task',
+            'is_goal': 1,
+            **row,
+        })
+
+    for row in custom_rows:
+        rows.append({
+            'archive_id': f"custom_item:{row['id']}",
+            'source_type': 'custom_item',
+            'item_kind': 'long_term_objective' if int(row.get('is_long_term_objective') or 0) else ('task' if int(row.get('is_task') or 0) else 'goal_item'),
+            **row,
+        })
 
     def term_bucket(row):
         td = (row.get('target_date') or '').strip()
@@ -729,6 +812,10 @@ def get_goals_archive():
                 return 'long'
             except ValueError:
                 pass
+        if row.get('item_kind') == 'long_term_objective':
+            return 'long'
+        if row.get('item_kind') == 'task':
+            return 'short'
         # No date — fall back on priority
         p = int(row.get('priority') or 0)
         if p >= 2:
@@ -739,6 +826,13 @@ def get_goals_archive():
 
     for row in rows:
         row['term'] = term_bucket(row)
+
+    rows.sort(key=lambda r: (
+        {'overdue': 0, 'short': 1, 'medium': 2, 'long': 3}.get(r.get('term'), 9),
+        int(r.get('is_completed') or 0),
+        -(int(r.get('priority') or 0)),
+        str(r.get('title') or '').lower(),
+    ))
 
     return jsonify(rows)
 
@@ -916,8 +1010,8 @@ def ai_build_routine():
                 '''
                 INSERT INTO custom_items (
                     section_key, name, status_id, notes, sort_order, is_task,
-                    task_time, task_interval, subgroup, is_long_term_objective, objective_completed
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,0)
+                    task_time, task_interval, subgroup, is_long_term_objective, is_goal, objective_completed
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,0)
                 ''',
                 (
                     page_key,
@@ -930,6 +1024,7 @@ def ai_build_routine():
                     item.get('task_interval') or data.get('cadence') or 'daily',
                     item.get('subgroup'),
                     1 if section_type == 'long_term_objective' else 0,
+                    1,
                 )
             )
             created_items += 1
@@ -1301,11 +1396,11 @@ def add_custom_item(section_key):
     db = get_db()
     try:
         db.execute(
-            'INSERT INTO custom_items (section_key, name, status_id, link, notes, sort_order, is_task, task_time, task_count, task_interval, subgroup, is_quick_objective, is_long_term_objective, objective_completed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)',
+            'INSERT INTO custom_items (section_key, name, status_id, link, notes, sort_order, is_task, task_time, task_count, task_interval, subgroup, is_quick_objective, is_long_term_objective, is_goal, objective_completed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)',
             (section_key, normalized['name'], normalized['status_id'],
              normalized['link'], normalized['notes'], normalized['sort_order'],
              normalized['is_task'], normalized['task_time'], normalized['task_count'], normalized['task_interval'], normalized['subgroup'],
-             normalized['is_quick_objective'], normalized['is_long_term_objective']))
+             normalized['is_quick_objective'], normalized['is_long_term_objective'], normalized['is_goal']))
         db.commit()
     except sqlite3.IntegrityError as exc:
         db.rollback()
@@ -1327,12 +1422,12 @@ def update_custom_item(section_key, item_id):
     db = get_db()
     try:
         cur = db.execute('''UPDATE custom_items
-                                                        SET name=?, status_id=?, link=?, notes=?, sort_order=?, is_task=?, task_time=?, task_count=?, task_interval=?, subgroup=?, is_quick_objective=?, is_long_term_objective=?, updated_at=datetime('now')
+                                                        SET name=?, status_id=?, link=?, notes=?, sort_order=?, is_task=?, task_time=?, task_count=?, task_interval=?, subgroup=?, is_quick_objective=?, is_long_term_objective=?, is_goal=?, updated_at=datetime('now')
                             WHERE id=? AND section_key=?''',
                          (normalized['name'], normalized['status_id'], normalized['link'],
                           normalized['notes'], normalized['sort_order'],
                           normalized['is_task'], normalized['task_time'], normalized['task_count'], normalized['task_interval'],
-                                                    normalized['subgroup'], normalized['is_quick_objective'], normalized['is_long_term_objective'],
+                                                    normalized['subgroup'], normalized['is_quick_objective'], normalized['is_long_term_objective'], normalized['is_goal'],
                           item_id, section_key))
         if cur.rowcount == 0:
             db.rollback()

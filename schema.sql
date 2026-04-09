@@ -168,6 +168,7 @@ CREATE TABLE IF NOT EXISTS custom_items (
     subgroup TEXT,
     is_quick_objective INTEGER DEFAULT 0,
     is_long_term_objective INTEGER DEFAULT 0,
+    is_goal INTEGER DEFAULT 0,
     objective_completed INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))

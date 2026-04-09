@@ -2038,8 +2038,8 @@ let _archiveFilter = 'all'; // 'all' | 'active' | 'completed'
 
 async function renderGoalArchive(c) {
   c.innerHTML = `<div class="page-header"><h2>Goal Archive</h2><button class="btn btn-primary" onclick="openGoalModal()">+ Add Goal</button></div><div class="analysis-loading"><span class="spin">⟳</span> Loading…</div>`;
-  const goals = await fetch('/api/goals/archive').then(r => r.json()).catch(() => []);
-  if (!Array.isArray(goals)) { c.innerHTML = '<div class="card">Failed to load goals.</div>'; return; }
+  const entries = await fetch('/api/goals/archive').then(r => r.json()).catch(() => []);
+  if (!Array.isArray(entries)) { c.innerHTML = '<div class="card">Failed to load goals.</div>'; return; }
 
   const TERMS = [
     { key: 'overdue', label: 'Overdue',     subtitle: 'Past target date' },
@@ -2055,16 +2055,16 @@ async function renderGoalArchive(c) {
   }
 
   function buildPage() {
-    const filtered = filterGoals(goals);
-    const totalActive = goals.filter(g => !g.is_completed).length;
-    const totalDone = goals.filter(g => g.is_completed).length;
+    const filtered = filterGoals(entries);
+    const totalActive = entries.filter(g => !g.is_completed).length;
+    const totalDone = entries.filter(g => g.is_completed).length;
 
     const filterBar = `
       <div class="archive-filters">
         <span style="font-size:12px;color:var(--text-muted)">Show:</span>
         ${['all','active','completed'].map(f => `
           <span class="filter-chip ${_archiveFilter === f ? 'active' : ''}" onclick="setArchiveFilter('${f}')">${
-            f === 'all' ? `All (${goals.length})` : f === 'active' ? `Active (${totalActive})` : `Completed (${totalDone})`
+            f === 'all' ? `All (${entries.length})` : f === 'active' ? `Active (${totalActive})` : `Completed (${totalDone})`
           }</span>`).join('')}
       </div>`;
 
@@ -2076,7 +2076,11 @@ async function renderGoalArchive(c) {
       const cards = termGoals.map(g => {
         const statusColor = g.is_completed ? 'var(--green)' : (g.priority === 2 ? 'var(--red)' : g.priority === 1 ? 'var(--orange)' : 'var(--blue)');
         const priorityText = g.priority === 2 ? 'High' : g.priority === 1 ? 'Medium' : 'Low';
+        const kindLabel = g.item_kind === 'long_term_objective' ? 'Long-Term Objective' : (g.item_kind === 'task' ? 'Task' : 'Goal');
+        const isEditableGoal = g.source_type === 'goal';
         const isOverdue = g.target_date && g.target_date < today && !g.is_completed;
+        const sourceLabel = g.source_type === 'custom_item' ? 'Custom Section' : (g.source_type === 'task' ? 'Goal Task' : 'Goal');
+        const sectionKeyArg = JSON.stringify(String(g.section_key || ''));
         return `
           <div class="archive-goal-card ${g.is_completed ? 'completed-card' : ''}">
             <div class="agc-status" style="background:${statusColor}"></div>
@@ -2085,16 +2089,24 @@ async function renderGoalArchive(c) {
               ${g.description ? `<div class="agc-desc">${esc(g.description)}</div>` : ''}
               <div class="agc-tags">
                 <span class="agc-tag area">${esc(g.area_name || '')}</span>
+                <span class="agc-tag">${kindLabel}</span>
+                <span class="agc-tag">${sourceLabel}</span>
+                <span class="agc-tag">is_goal: ${g.is_goal ? 'yes' : 'no'}</span>
                 <span class="agc-tag">${priorityText} priority</span>
                 ${g.target_date ? `<span class="agc-tag date ${isOverdue ? 'overdue' : ''}">📅 ${esc(g.target_date)}${isOverdue ? ' ⚠' : ''}</span>` : ''}
                 ${g.is_completed ? `<span class="agc-tag" style="color:var(--green);border-color:rgba(63,185,80,0.3)">✓ Done</span>` : ''}
               </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
-              <button class="btn-icon" onclick="openGoalModal(${g.id})" title="Edit">✎</button>
-              <button class="btn-icon ${g.is_completed ? '' : 'btn-danger'}" onclick="archiveToggleGoal(${g.id},${g.is_completed ? 0 : 1})" title="${g.is_completed ? 'Reopen' : 'Complete'}">
-                ${g.is_completed ? '↩' : '✓'}
-              </button>
+              ${isEditableGoal ? `
+                <button class="btn-icon" onclick="openGoalModal(${g.id})" title="Edit">✎</button>
+                <button class="btn-icon ${g.is_completed ? '' : 'btn-danger'}" onclick="archiveToggleGoal(${g.id},${g.is_completed ? 0 : 1})" title="${g.is_completed ? 'Reopen' : 'Complete'}">
+                  ${g.is_completed ? '↩' : '✓'}
+                </button>
+              ` : ''}
+              ${(!isEditableGoal && g.section_key) ? `
+                <button class="btn-icon" onclick='loadPage(${sectionKeyArg})' title="Open section">↗</button>
+              ` : ''}
             </div>
           </div>`;
       }).join('');
@@ -2104,7 +2116,7 @@ async function renderGoalArchive(c) {
           <div class="term-header">
             <span class="term-badge ${t.key}">${t.label}</span>
             <span class="term-subtitle">${t.subtitle}</span>
-            <span class="term-count">${termGoals.length} goal${termGoals.length !== 1 ? 's' : ''}</span>
+            <span class="term-count">${termGoals.length} item${termGoals.length !== 1 ? 's' : ''}</span>
           </div>
           ${cards}
         </div>`;
@@ -2131,7 +2143,7 @@ function setArchiveFilter(f) {
 
 async function archiveToggleGoal(id, completed) {
   const goals = await fetch('/api/goals/archive').then(r => r.json()).catch(() => []);
-  const goal = Array.isArray(goals) ? goals.find(g => g.id === id) : null;
+  const goal = Array.isArray(goals) ? goals.find(g => g.source_type === 'goal' && g.id === id) : null;
   if (!goal) return;
   goal.is_completed = completed;
   const res = await api(`goals/${id}`, { method: 'PUT', body: goal });
