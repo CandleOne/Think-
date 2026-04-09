@@ -661,6 +661,156 @@ def query_ai_empowered(prompt: str, context: dict[str, Any] | None = None, token
     }
 
 
+# ── Goal Analysis ──────────────────────────────────────────────────────────────
+
+def _heuristic_analyze_goals(goals: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fallback heuristic analysis when no AI provider is available."""
+    from datetime import date as _date
+    today = _date.today()
+    analyzed = []
+    for g in goals:
+        priority = int(g.get("priority") or 0)
+        has_desc = bool((g.get("description") or "").strip())
+        area = (g.get("area_name") or "").lower()
+        target = (g.get("target_date") or "").strip()
+
+        difficulty = [3, 5, 7][min(priority, 2)] + (1 if has_desc else 0)
+
+        time_map = {
+            "career": 200, "academic": 150, "fitness": 100,
+            "finance": 80, "hobbies": 50, "appearance": 30,
+        }
+        time_hours = next((v for k, v in time_map.items() if k in area), 100)
+
+        price_map = {
+            "career": 500, "academic": 2000, "fitness": 300,
+            "finance": 100, "hobbies": 200, "appearance": 400,
+        }
+        price = next((v for k, v in price_map.items() if k in area), 200)
+
+        urgency = 0
+        if target:
+            try:
+                t = _date.fromisoformat(target)
+                days_left = (t - today).days
+                if days_left < 30:
+                    urgency = 30
+                elif days_left < 90:
+                    urgency = 15
+                elif days_left < 180:
+                    urgency = 5
+            except ValueError:
+                pass
+
+        base_score = priority * 20 + 30
+        priority_score = min(100, base_score + urgency)
+        label = ["Low", "Medium", "High"][min(priority, 2)]
+        analyzed.append({
+            "id": g["id"],
+            "difficulty": difficulty,
+            "time_commitment_hours": time_hours,
+            "price_estimate": price,
+            "priority_score": priority_score,
+            "reasoning": (
+                f"{label}-priority {area or 'general'} goal; "
+                "estimate based on life-area norms (configure an AI key for deeper analysis)."
+            ),
+        })
+
+    sorted_goals = sorted(analyzed, key=lambda x: -x["priority_score"])
+    return {
+        "mode": "heuristic",
+        "goals": analyzed,
+        "priority_list": [x["id"] for x in sorted_goals],
+        "summary": (
+            f"Heuristic analysis of {len(goals)} active goal(s). "
+            "Set ANTHROPIC_API_KEY or OPENAI_API_KEY for AI-powered insights."
+        ),
+    }
+
+
+def analyze_goals(goals: list[dict[str, Any]]) -> dict[str, Any]:
+    """Analyze goals and return per-goal difficulty / time / cost scores plus a priority ranking."""
+    if not goals:
+        return {
+            "mode": "heuristic",
+            "goals": [],
+            "priority_list": [],
+            "summary": "No active goals to analyze.",
+        }
+
+    system_prompt = (
+        "You are a life coach and strategic planner. "
+        "Analyze each personal goal and assess: "
+        "difficulty (integer 1-10, 1=trivial, 10=extremely hard), "
+        "time_commitment_hours (total estimated hours to achieve, number), "
+        "price_estimate (estimated USD cost to achieve, 0 if free), "
+        "priority_score (integer 1-100 reflecting urgency × impact × feasibility), "
+        "reasoning (one concise sentence). "
+        "Then supply a top-level priority_list of goal IDs in recommended tackle order (highest impact first) "
+        "and a summary paragraph. "
+        "Return JSON with keys: goals (array of objects with id, difficulty, time_commitment_hours, "
+        "price_estimate, priority_score, reasoning), priority_list (array of ints), summary (string)."
+    )
+    user_prompt = json.dumps(
+        {
+            "today": datetime.utcnow().strftime("%Y-%m-%d"),
+            "goals": [
+                {
+                    "id": g.get("id"),
+                    "title": g.get("title"),
+                    "description": g.get("description") or "",
+                    "life_area": g.get("area_name") or "",
+                    "priority": g.get("priority"),
+                    "target_date": g.get("target_date") or "",
+                }
+                for g in goals
+            ],
+        },
+        ensure_ascii=True,
+    )
+
+    provider, result = _call_ai_json(system_prompt, user_prompt, max_tokens=2048)
+
+    if result and isinstance(result.get("goals"), list):
+        clean_goals = []
+        for item in result.get("goals", []):
+            if not isinstance(item, dict) or "id" not in item:
+                continue
+            try:
+                clean_goals.append(
+                    {
+                        "id": int(item["id"]),
+                        "difficulty": max(1, min(10, int(item.get("difficulty") or 5))),
+                        "time_commitment_hours": float(item.get("time_commitment_hours") or 10),
+                        "price_estimate": float(item.get("price_estimate") or 0),
+                        "priority_score": max(1, min(100, int(item.get("priority_score") or 50))),
+                        "reasoning": str(item.get("reasoning") or ""),
+                    }
+                )
+            except (TypeError, ValueError):
+                continue
+
+        priority_list: list[int] = []
+        if isinstance(result.get("priority_list"), list):
+            for pid in result["priority_list"]:
+                try:
+                    priority_list.append(int(pid))
+                except (TypeError, ValueError):
+                    pass
+        if not priority_list:
+            priority_list = [x["id"] for x in sorted(clean_goals, key=lambda x: -x["priority_score"])]
+
+        return {
+            "mode": provider,
+            "goals": clean_goals,
+            "priority_list": priority_list,
+            "summary": str(result.get("summary") or "AI analysis complete."),
+        }
+
+    return _heuristic_analyze_goals(goals)
+
+
 def optimize_schedule(tasks: list[dict[str, Any]], preferences: dict[str, Any] | None = None) -> PlanResult:
     preferences = preferences or {}
     provider, llm_result = _call_ai_json(

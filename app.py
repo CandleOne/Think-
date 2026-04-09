@@ -32,7 +32,7 @@ def load_local_env(env_path='.env'):
 
 load_local_env()
 
-from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info, query_ai, query_ai_empowered
+from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info, query_ai, query_ai_empowered, analyze_goals
 
 app = Flask(__name__, static_folder='static')
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lifeoptimization.db')
@@ -83,6 +83,18 @@ def ensure_schema_compatibility():
             WHERE page_key = 'custom_financial_theory'
               AND COALESCE(is_long_term_section, 0) = 0
         ''')
+
+        goal_columns = {row[1] for row in conn.execute("PRAGMA table_info(goals)").fetchall()}
+        for col, coltype in [
+            ('difficulty', 'INTEGER'),
+            ('time_commitment_hours', 'REAL'),
+            ('price_estimate', 'REAL'),
+            ('ai_priority_score', 'INTEGER'),
+            ('ai_reasoning', 'TEXT'),
+        ]:
+            if col not in goal_columns:
+                conn.execute(f'ALTER TABLE goals ADD COLUMN {col} {coltype}')
+
         conn.commit()
     except sqlite3.OperationalError:
         # Database may not be initialized yet; init scripts can create full schema.
@@ -1045,6 +1057,61 @@ def ai_query():
         'mode': result.get('mode', 'heuristic'),
         'answer': result.get('answer', ''),
         'token_limit': result.get('token_limit', token_limit),
+    })
+
+
+@app.route('/api/ai/analyze-goals', methods=['POST'])
+def ai_analyze_goals():
+    data = request.get_json(silent=True) or {}
+    apply_scores = 1 if int(data.get('apply', 0) or 0) else 0
+
+    db = get_db()
+    goals = rows_to_list(db.execute('''
+        SELECT g.*, la.name as area_name
+        FROM goals g
+        JOIN life_areas la ON g.life_area_id = la.id
+        WHERE g.is_completed = 0
+        ORDER BY la.sort_order, g.priority DESC, g.title
+    ''').fetchall())
+
+    if not goals:
+        db.close()
+        return jsonify({
+            'ok': True, 'mode': 'heuristic',
+            'goals': [], 'priority_list': [],
+            'summary': 'No active goals found.'
+        })
+
+    result = analyze_goals(goals)
+
+    if apply_scores and result.get('goals'):
+        for item in result['goals']:
+            db.execute(
+                """UPDATE goals
+                   SET difficulty=?, time_commitment_hours=?, price_estimate=?,
+                       ai_priority_score=?, ai_reasoning=?, updated_at=datetime('now')
+                   WHERE id=?""",
+                (item.get('difficulty'), item.get('time_commitment_hours'),
+                 item.get('price_estimate'), item.get('priority_score'),
+                 item.get('reasoning'), item['id'])
+            )
+        db.commit()
+
+    # Build a merged response so the frontend has full goal context
+    goals_by_id = {g['id']: g for g in goals}
+    enriched = []
+    for item in result.get('goals', []):
+        merged = dict(goals_by_id.get(item['id'], {}))
+        merged.update(item)
+        enriched.append(merged)
+
+    db.close()
+    return jsonify({
+        'ok': True,
+        'mode': result.get('mode', 'heuristic'),
+        'goals': enriched,
+        'priority_list': result.get('priority_list', []),
+        'summary': result.get('summary', ''),
     })
 
 

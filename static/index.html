@@ -139,6 +139,33 @@ a:hover { text-decoration: underline; }
 .priority-med { color: var(--orange); }
 .priority-low { color: var(--text-muted); }
 
+/* Goal AI Analysis */
+.goal-analysis-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+.goal-analysis-panel .analysis-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.goal-analysis-panel .analysis-title { font-size: 15px; font-weight: 600; color: var(--accent); }
+.goal-analysis-panel .analysis-meta { font-size: 11px; color: var(--text-muted); }
+.goal-analysis-panel .analysis-summary { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5; }
+.goal-priority-list { display: flex; flex-direction: column; gap: 10px; }
+.goal-priority-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 14px; display: flex; gap: 14px; align-items: flex-start; }
+.goal-rank { font-size: 18px; font-weight: 700; color: var(--accent); min-width: 28px; flex-shrink: 0; line-height: 1.1; }
+.goal-rank.rank-1 { color: #ffd700; }
+.goal-rank.rank-2 { color: #c0c0c0; }
+.goal-rank.rank-3 { color: #cd7f32; }
+.goal-priority-info { flex: 1; min-width: 0; }
+.goal-priority-name { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.goal-priority-area { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+.goal-priority-reasoning { font-size: 12px; color: var(--text-muted); line-height: 1.4; margin-bottom: 8px; }
+.goal-metrics { display: flex; gap: 10px; flex-wrap: wrap; }
+.goal-metric { display: flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 8px; border-radius: 4px; background: var(--surface); border: 1px solid var(--border); }
+.goal-metric .metric-icon { font-size: 13px; }
+.goal-metric .metric-val { font-weight: 600; }
+.diff-easy { border-color: var(--green) !important; }
+.diff-med { border-color: var(--orange) !important; }
+.diff-hard { border-color: var(--red) !important; }
+.analysis-loading { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); padding: 10px 0; }
+.spin { display: inline-block; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* Custom items with notes */
 .custom-item { margin-bottom: 4px; cursor: grab; }
 .custom-item[draggable] { transition: opacity 0.15s, border-color 0.15s; }
@@ -1767,11 +1794,22 @@ async function renderGoals(c) {
   });
   const priorityLabel = p => p === 2 ? '<span class="priority-high">High</span>' : p === 1 ? '<span class="priority-med">Med</span>' : '<span class="priority-low">Low</span>';
 
+  // Check if we should auto-run daily analysis
+  const lastAnalysisKey = 'lifeopt_goal_analysis_date';
+  const lastAnalysisData = 'lifeopt_goal_analysis_data';
+  const today = new Date().toISOString().slice(0, 10);
+  const lastDate = localStorage.getItem(lastAnalysisKey);
+  const cachedData = localStorage.getItem(lastAnalysisData);
+
   c.innerHTML = `
     <div class="page-header">
       <h2>Goals</h2>
-      <button class="btn btn-primary" onclick="openGoalModal()">+ Add Goal</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="btn-analyze-goals" onclick="runGoalAnalysis()">🧠 AI Analysis</button>
+        <button class="btn btn-primary" onclick="openGoalModal()">+ Add Goal</button>
+      </div>
     </div>
+    <div id="goal-analysis-container"></div>
     ${Object.entries(grouped).map(([area, goals]) => `
       <div class="card">
         <h3>${esc(area)}</h3>
@@ -1795,6 +1833,108 @@ async function renderGoals(c) {
         </ul>
       </div>
     `).join('')}`;
+
+  // Show cached analysis immediately, auto-refresh if stale
+  const container = document.getElementById('goal-analysis-container');
+  if (cachedData) {
+    try {
+      renderGoalAnalysisPanel(JSON.parse(cachedData), container);
+    } catch(e) {}
+  }
+  if (lastDate !== today) {
+    runGoalAnalysis(true);
+  }
+}
+
+async function runGoalAnalysis(silent) {
+  const container = document.getElementById('goal-analysis-container');
+  if (!container) return;
+  if (!silent) {
+    container.innerHTML = `<div class="goal-analysis-panel"><div class="analysis-loading"><span class="spin">⟳</span> Analyzing your goals…</div></div>`;
+  }
+  try {
+    const res = await api('ai/analyze-goals', { method: 'POST', body: { apply: 1 } });
+    if (res && res.ok) {
+      localStorage.setItem('lifeopt_goal_analysis_date', new Date().toISOString().slice(0, 10));
+      localStorage.setItem('lifeopt_goal_analysis_data', JSON.stringify(res));
+      renderGoalAnalysisPanel(res, container);
+    } else if (!silent) {
+      container.innerHTML = `<div class="goal-analysis-panel" style="color:var(--red)">Analysis failed. Please try again.</div>`;
+    }
+  } catch(e) {
+    if (!silent) container.innerHTML = `<div class="goal-analysis-panel" style="color:var(--red)">Error: ${esc(String(e))}</div>`;
+  }
+}
+
+function renderGoalAnalysisPanel(data, container) {
+  if (!container) return;
+  if (!data || !data.priority_list || data.priority_list.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  const goalsById = {};
+  (data.goals || []).forEach(g => { goalsById[g.id] = g; });
+
+  const modeLabel = data.mode === 'heuristic' ? '⚙ Heuristic' : '🤖 AI';
+  const today = new Date().toISOString().slice(0, 10);
+
+  const diffClass = d => d <= 3 ? 'diff-easy' : d <= 6 ? 'diff-med' : 'diff-hard';
+  const fmtTime = h => h >= 1000 ? `${Math.round(h/100)/10}k hrs` : h >= 100 ? `${Math.round(h)} hrs` : `${h} hrs`;
+  const fmtCost = p => p === 0 ? 'Free' : p < 1000 ? `$${Math.round(p)}` : `$${(p/1000).toFixed(1)}k`;
+  const rankLabel = (i) => {
+    if (i === 0) return '<span class="goal-rank rank-1">#1</span>';
+    if (i === 1) return '<span class="goal-rank rank-2">#2</span>';
+    if (i === 2) return '<span class="goal-rank rank-3">#3</span>';
+    return `<span class="goal-rank">#${i+1}</span>`;
+  };
+
+  const cards = data.priority_list.map((id, i) => {
+    const g = goalsById[id];
+    if (!g) return '';
+    const diff = g.difficulty || '?';
+    const dclass = typeof diff === 'number' ? diffClass(diff) : '';
+    return `
+      <div class="goal-priority-card">
+        ${rankLabel(i)}
+        <div class="goal-priority-info">
+          <div class="goal-priority-name">${esc(g.title)}</div>
+          <div class="goal-priority-area">${esc(g.area_name || '')}</div>
+          ${g.reasoning ? `<div class="goal-priority-reasoning">${esc(g.reasoning)}</div>` : ''}
+          <div class="goal-metrics">
+            <div class="goal-metric ${dclass}">
+              <span class="metric-icon">⚡</span>
+              <span>Difficulty</span>
+              <span class="metric-val">${diff}/10</span>
+            </div>
+            <div class="goal-metric">
+              <span class="metric-icon">⏱</span>
+              <span>Time</span>
+              <span class="metric-val">${g.time_commitment_hours != null ? fmtTime(g.time_commitment_hours) : '—'}</span>
+            </div>
+            <div class="goal-metric">
+              <span class="metric-icon">💰</span>
+              <span>Cost</span>
+              <span class="metric-val">${g.price_estimate != null ? fmtCost(g.price_estimate) : '—'}</span>
+            </div>
+            <div class="goal-metric">
+              <span class="metric-icon">🎯</span>
+              <span>Score</span>
+              <span class="metric-val">${g.priority_score != null ? g.priority_score : '—'}/100</span>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="goal-analysis-panel">
+      <div class="analysis-header">
+        <span class="analysis-title">Priority Ranking</span>
+        <span class="analysis-meta">${modeLabel} · updated ${today} · <a href="#" onclick="runGoalAnalysis();return false;">Refresh</a></span>
+      </div>
+      ${data.summary ? `<div class="analysis-summary">${esc(data.summary)}</div>` : ''}
+      <div class="goal-priority-list">${cards}</div>
+    </div>`;
 }
 
 async function openGoalModal(editId) {
