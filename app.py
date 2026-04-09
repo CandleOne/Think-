@@ -1287,6 +1287,8 @@ def ai_today_plan():
     except (TypeError, ValueError):
         end_hour = 22
     end_hour = max(18, min(24, end_hour))
+    selected_archive_ids = data.get('selected_archive_ids') if isinstance(data.get('selected_archive_ids'), list) else []
+    selected_set = {str(x) for x in selected_archive_ids if str(x).strip()}
 
     db = get_db()
     schedule_tasks = rows_to_list(db.execute('''
@@ -1319,6 +1321,9 @@ def ai_today_plan():
         if source_type in {'goal', 'task'} or item_kind in {'task', 'long_term_objective', 'goal_item', 'goal'}:
             candidates.append(item)
 
+    if selected_set:
+        candidates = [c for c in candidates if str(c.get('archive_id') or '') in selected_set]
+
     plan = build_today_plan(schedule_tasks, candidates, now_iso=now_iso, end_hour=end_hour)
 
     return jsonify({
@@ -1327,6 +1332,7 @@ def ai_today_plan():
         'summary': plan.get('summary', ''),
         'schedule': schedule_tasks,
         'candidates_considered': len(candidates),
+        'selected_candidates': len(selected_set),
         'free_minutes': int(plan.get('free_minutes') or 0),
         'recommendations': plan.get('recommendations', []),
     })

@@ -2070,6 +2070,43 @@ async function deleteGoal(id) {
 // ── Utils ──
 // ── Goal Archive ──
 let _archiveFilter = 'all'; // 'all' | 'active' | 'completed'
+let _todaySelectedArchiveIds = [];
+let _todayOptimizedPlan = null;
+
+function toggleTodayArchiveSelection(archiveId, checked) {
+  const id = String(archiveId || '');
+  if (!id) return;
+  if (checked) {
+    if (!_todaySelectedArchiveIds.includes(id)) _todaySelectedArchiveIds.push(id);
+  } else {
+    _todaySelectedArchiveIds = _todaySelectedArchiveIds.filter(x => x !== id);
+  }
+}
+
+async function optimizeSelectedTodayGoals() {
+  if (!_todaySelectedArchiveIds.length) {
+    toast('Select at least one goal first');
+    return;
+  }
+  const res = await api('ai/today-plan', {
+    method: 'POST',
+    body: {
+      now_iso: new Date().toISOString(),
+      timezone: getTimezone(),
+      end_hour: 22,
+      selected_archive_ids: _todaySelectedArchiveIds,
+    },
+  });
+  if (showApiError(res)) return;
+  _todayOptimizedPlan = res;
+  toast(`Optimized ${_todaySelectedArchiveIds.length} selected goal${_todaySelectedArchiveIds.length !== 1 ? 's' : ''}`);
+  renderGoalArchive(document.getElementById('content'));
+}
+
+function resetTodayGoalOptimization() {
+  _todayOptimizedPlan = null;
+  renderGoalArchive(document.getElementById('content'));
+}
 
 async function renderGoalArchive(c) {
   c.innerHTML = `<div class="page-header"><h2>Goal Archive</h2><button class="btn btn-primary" onclick="openGoalModal()">+ Add Goal</button></div><div class="analysis-loading"><span class="spin">⟳</span> Loading…</div>`;
@@ -2159,14 +2196,18 @@ async function renderGoalArchive(c) {
 
     let todayPlanRes = null;
     if (_archiveFilter === 'today') {
-      todayPlanRes = await api('ai/today-plan', {
-        method: 'POST',
-        body: {
-          now_iso: new Date().toISOString(),
-          timezone: getTimezone(),
-          end_hour: 22,
-        },
-      });
+      if (_todayOptimizedPlan && !apiHasError(_todayOptimizedPlan)) {
+        todayPlanRes = _todayOptimizedPlan;
+      } else {
+        todayPlanRes = await api('ai/today-plan', {
+          method: 'POST',
+          body: {
+            now_iso: new Date().toISOString(),
+            timezone: getTimezone(),
+            end_hour: 22,
+          },
+        });
+      }
     }
 
     const todaySchedule = (todayPlanRes && !apiHasError(todayPlanRes) && Array.isArray(todayPlanRes.schedule))
@@ -2177,7 +2218,37 @@ async function renderGoalArchive(c) {
       : [];
     const freeMinutes = Number(todayPlanRes?.free_minutes || 0);
     const candidatesConsidered = Number(todayPlanRes?.candidates_considered || 0);
+    const selectedCandidates = Number(todayPlanRes?.selected_candidates || 0);
     const planSummary = String(todayPlanRes?.summary || '');
+
+    const selectableGoals = entries
+      .filter(g => g.source_type === 'goal' && !g.is_completed)
+      .map(g => ({ ...g, _score: goalOpportunityScore(g, todayIso), _mins: estimateGoalSessionMinutes(g) }))
+      .sort((a, b) => b._score - a._score)
+      .slice(0, 14);
+
+    // Keep selection valid against currently available goals.
+    const selectableIds = new Set(selectableGoals.map(g => String(g.archive_id || '')));
+    _todaySelectedArchiveIds = _todaySelectedArchiveIds.filter(id => selectableIds.has(id));
+
+    const selectableGoalCards = selectableGoals.map(g => {
+      const aid = String(g.archive_id || '');
+      const checked = _todaySelectedArchiveIds.includes(aid);
+      return `
+        <label class="archive-goal-card" style="cursor:pointer;align-items:center" for="goal-pick-${esc(aid)}">
+          <input id="goal-pick-${esc(aid)}" type="checkbox" ${checked ? 'checked' : ''}
+            onchange="toggleTodayArchiveSelection('${esc(aid)}', this.checked)"
+            style="margin-right:8px;accent-color:var(--accent)">
+          <div class="agc-body">
+            <div class="agc-title">${esc(g.title)}</div>
+            <div class="agc-tags">
+              <span class="agc-tag area">${esc(g.area_name || '')}</span>
+              <span class="agc-tag">~${Math.round(Number(g._mins || 0))} min</span>
+              <span class="agc-tag">score ${Math.round(Number(g._score || 0))}</span>
+            </div>
+          </div>
+        </label>`;
+    }).join('');
 
     const scheduleCards = todaySchedule.map(g => {
       const sectionKeyArg = JSON.stringify(String(g.section_key || ''));
@@ -2304,6 +2375,7 @@ async function renderGoalArchive(c) {
                <span class="today-stat">Now: ${formatLiveClock()}</span>
                <span class="today-stat">Schedule tasks: ${todaySchedule.length}</span>
                <span class="today-stat">Candidates checked: ${candidatesConsidered}</span>
+               <span class="today-stat">Selected: ${selectedCandidates || _todaySelectedArchiveIds.length}</span>
                <span class="today-stat">Free time detected: ${Math.floor(freeMinutes / 60)}h ${freeMinutes % 60}m</span>
                <span class="today-stat">AI picks: ${recommendedGoals.length}</span>
              </div>
@@ -2316,7 +2388,13 @@ async function renderGoalArchive(c) {
                </div>
                <div class="today-col">
                  <h4>Top Goals You Can Fit Today</h4>
-                 <div class="today-meta">Recommended by priority and estimated effort within your remaining budget</div>
+                 <div class="today-meta">Pick goals below, then run AI optimization to place them in your remaining schedule</div>
+                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+                   <button class="btn btn-primary" onclick="optimizeSelectedTodayGoals()">Optimize Selected Goals</button>
+                   <button class="btn" onclick="resetTodayGoalOptimization()">Reset to Auto Plan</button>
+                 </div>
+                 ${selectableGoals.length ? `<div style="max-height:280px;overflow:auto;padding-right:2px;margin-bottom:10px">${selectableGoalCards}</div>` : '<div class="archive-empty" style="margin-bottom:10px">No active goals available to pick.</div>'}
+                 <div class="today-meta" style="margin-top:4px">AI result:</div>
                  ${recommendedGoals.length ? goalCards : '<div class="archive-empty">No goal blocks fit the remaining time today.</div>'}
                </div>
              </div>
