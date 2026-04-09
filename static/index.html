@@ -336,6 +336,16 @@ a:hover { text-decoration: underline; }
 .load-banner-item { font-size: 12px; color: #ffd4d1; background: rgba(13,17,23,0.45); border: 1px solid rgba(248,81,73,0.35); border-radius: 999px; padding: 5px 9px; display: inline-flex; align-items: center; gap: 8px; }
 .load-banner-item button { background: transparent; border: 1px solid rgba(255,212,209,0.45); color: #ffd4d1; border-radius: 999px; font-size: 11px; padding: 2px 8px; cursor: pointer; }
 .load-banner-item button:hover { background: rgba(255,212,209,0.12); }
+
+/* AI Interface */
+.ai-chat-wrap { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.ai-chat-feed { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; min-height: 360px; max-height: 62vh; overflow-y: auto; padding: 14px; }
+.ai-msg { margin-bottom: 12px; }
+.ai-msg-role { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin-bottom: 4px; }
+.ai-msg-bubble { border: 1px solid var(--border); background: var(--surface2); border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+.ai-msg-user .ai-msg-bubble { border-color: rgba(88,166,255,0.45); background: rgba(88,166,255,0.08); }
+.ai-query-actions { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.ai-status-pill { font-size: 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 4px 8px; background: var(--surface2); }
 </style>
 </head>
 <body>
@@ -380,6 +390,8 @@ let lifeAreas = [];
 let sidebarSections = [];
 let currentPage = 'dashboard';
 let loadFailures = {};
+let aiChatHistory = [];
+let aiStatusInfo = null;
 const loadBannerPrefKey = 'lifeopt_load_banner_expanded';
 let loadBannerExpanded = localStorage.getItem(loadBannerPrefKey) === '1';
 
@@ -592,15 +604,18 @@ function buildSidebar() {
       <span class="nav-add" onclick="openAddItemToGroupModal('${esc(group)}')" title="Add page to ${esc(group)}">+</span>
     </div>`;
     items.forEach(s => {
-      const removeBtn = s.page_key === 'dashboard' ? '' :
+      const isAiPage = s.page_key === 'ai_interface';
+      const removeBtn = (s.page_key === 'dashboard' || isAiPage) ? '' :
         `<span class="nav-remove" onclick="event.stopPropagation(); removeSidebarSection(${s.id}, '${esc(s.label)}', '${esc(s.page_key)}')" title="Remove">✕</span>`;
       const scheduleIcon = s.is_schedule ? '<span class="nav-schedule-icon" title="Schedule">📅</span>' : '';
+      const aiIcon = isAiPage ? '<span class="nav-schedule-icon" title="AI">🤖</span>' : '';
       const hasLongTerm = Number(s.is_long_term_section || 0) === 1 || Number(s.long_term_count || 0) > 0;
       const longTermIcon = hasLongTerm ? '<span class="nav-lto-icon" title="Long-term objectives">🎯</span>' : '';
-      const scheduleToggle = s.page_key === 'dashboard' ? '' :
+      const scheduleToggle = (s.page_key === 'dashboard' || isAiPage) ? '' :
         `<span class="nav-schedule-toggle" onclick="event.stopPropagation(); toggleSchedule(${s.id})" title="${s.is_schedule ? 'Unmark as schedule' : 'Mark as schedule'}">${s.is_schedule ? '📅' : '🗓'}</span>`;
       html += `<div class="nav-item ${s.page_key === currentPage ? 'active' : ''}" data-page="${esc(s.page_key)}" data-id="${s.id}" draggable="true" onclick="navigateTo('${esc(s.page_key)}')" ondragstart="onSidebarDragStart(event)" ondragover="onSidebarDragOver(event)" ondrop="onSidebarDrop(event)" ondragend="onSidebarDragEnd(event)">
         <span class="nav-drag" title="Drag to reorder">⠿</span>
+        ${aiIcon}
         ${scheduleIcon}
         ${longTermIcon}
         <span class="nav-label">${esc(s.label)}</span>
@@ -679,9 +694,132 @@ async function loadPage(page) {
     case 'pharmacology': return renderPharmacology(c);
     case 'goals': return renderGoals(c);
     case 'schedule': return renderSchedule(c);
+    case 'ai_interface': return renderAiInterface(c);
     default:
       if (page.startsWith('custom_')) return renderCustomSection(c, page);
   }
+}
+
+async function ensureAiStatus() {
+  if (aiStatusInfo) return aiStatusInfo;
+  const res = await api('ai/status');
+  if (apiHasError(res)) {
+    aiStatusInfo = { provider: 'heuristic', model: 'heuristic', configured: false };
+    return aiStatusInfo;
+  }
+  aiStatusInfo = {
+    provider: res.provider || 'heuristic',
+    model: res.model || 'heuristic',
+    configured: !!res.configured,
+  };
+  return aiStatusInfo;
+}
+
+function renderAiMessages() {
+  const feed = document.getElementById('ai-chat-feed');
+  if (!feed) return;
+  if (!aiChatHistory.length) {
+    feed.innerHTML = `<div class="empty-state" style="padding:16px">Ask the AI to optimize your schedule, design routines, or break down long-term objectives into executable tasks.</div>`;
+    return;
+  }
+
+  feed.innerHTML = aiChatHistory.map(m => `
+    <div class="ai-msg ${m.role === 'user' ? 'ai-msg-user' : 'ai-msg-assistant'}">
+      <div class="ai-msg-role">${m.role === 'user' ? 'You' : 'AI'}${m.mode ? ` · ${esc(m.mode)}` : ''}</div>
+      <div class="ai-msg-bubble">${esc(m.content || '')}</div>
+    </div>
+  `).join('');
+  feed.scrollTop = feed.scrollHeight;
+}
+
+async function renderAiInterface(c) {
+  const status = await ensureAiStatus();
+  c.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h2>🤖 AI Interface</h2>
+        <span style="color:var(--text-muted);font-size:13px">Query the AI brain for planning, routines, and schedule strategy.</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="ai-status-pill">Provider: ${esc(status.provider)} · Model: ${esc(status.model)} · ${status.configured ? 'configured' : 'fallback mode'}</span>
+        <button class="btn" onclick="resetAiChat()">Clear Chat</button>
+      </div>
+    </div>
+    <div class="ai-chat-wrap">
+      <div class="ai-chat-feed" id="ai-chat-feed"></div>
+      <div class="card">
+        <form id="ai-query-form" onsubmit="event.preventDefault();sendAiQuery();">
+          <div class="form-group">
+            <label>Ask AI</label>
+            <textarea id="ai-query-input" name="prompt" placeholder="Example: Build me a tighter morning routine around market prep and fitness." required></textarea>
+          </div>
+          <div class="ai-query-actions">
+            <label style="font-size:13px;color:var(--text-muted)"><input type="checkbox" id="ai-include-schedule" checked> Include schedule context</label>
+            <div style="display:flex;gap:8px">
+              <button type="button" class="btn" onclick="seedAiPrompt('Optimize my current schedule and show the top 5 changes with reasons.')">Use Prompt Template</button>
+              <button type="submit" class="btn btn-primary">Send</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  renderAiMessages();
+}
+
+function seedAiPrompt(text) {
+  const input = document.getElementById('ai-query-input');
+  if (!input) return;
+  input.value = text;
+  input.focus();
+}
+
+function resetAiChat() {
+  aiChatHistory = [];
+  renderAiMessages();
+}
+
+async function sendAiQuery() {
+  const input = document.getElementById('ai-query-input');
+  const includeSchedule = document.getElementById('ai-include-schedule');
+  if (!input) return;
+  const prompt = (input.value || '').trim();
+  if (!prompt) {
+    toast('Enter a prompt first');
+    return;
+  }
+
+  aiChatHistory.push({ role: 'user', content: prompt });
+  aiChatHistory.push({ role: 'assistant', content: 'Thinking…', mode: 'pending' });
+  renderAiMessages();
+  input.value = '';
+
+  const history = aiChatHistory
+    .filter(m => m.mode !== 'pending')
+    .slice(-8)
+    .map(m => ({ role: m.role, content: m.content }));
+
+  const res = await api('ai/query', {
+    method: 'POST',
+    body: {
+      prompt,
+      history,
+      include_schedule_context: includeSchedule && includeSchedule.checked ? 1 : 0,
+    },
+  });
+
+  aiChatHistory = aiChatHistory.filter(m => m.mode !== 'pending');
+  if (showApiError(res)) {
+    aiChatHistory.push({ role: 'assistant', content: 'I could not process that request. Please try again.', mode: 'error' });
+    renderAiMessages();
+    return;
+  }
+
+  aiChatHistory.push({
+    role: 'assistant',
+    content: String(res.answer || '').trim() || 'No answer returned.',
+    mode: res.mode || 'heuristic',
+  });
+  renderAiMessages();
 }
 
 // ── Sidebar Management ──

@@ -5,7 +5,7 @@ Flask backend serving API + frontend for managing the life optimization database
 import sqlite3
 import os
 from flask import Flask, request, jsonify, send_from_directory
-from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info
+from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info, query_ai
 
 app = Flask(__name__, static_folder='static')
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lifeoptimization.db')
@@ -27,6 +27,20 @@ def ensure_schema_compatibility():
         sidebar_columns = {row[1] for row in conn.execute("PRAGMA table_info(sidebar_sections)").fetchall()}
         if 'is_long_term_section' not in sidebar_columns:
             conn.execute('ALTER TABLE sidebar_sections ADD COLUMN is_long_term_section INTEGER DEFAULT 0')
+
+        ai_section = conn.execute(
+            "SELECT id FROM sidebar_sections WHERE page_key='ai_interface'"
+        ).fetchone()
+        if not ai_section:
+            max_order = conn.execute('SELECT MAX(sort_order) FROM sidebar_sections').fetchone()[0] or 0
+            conn.execute(
+                """
+                INSERT INTO sidebar_sections (
+                    group_name, label, page_key, sort_order, is_builtin, is_schedule, is_long_term_section
+                ) VALUES ('AI', 'AI Interface', 'ai_interface', ?, 1, 0, 0)
+                """,
+                (max_order + 1,),
+            )
 
         # For existing Financial Theory data, default non-header rows to long-term objectives.
         conn.execute('''
@@ -664,7 +678,7 @@ def get_sidebar():
 
 
 BUILTIN_PAGES = {
-    'dashboard', 'purchases', 'fashion', 'skincare', 'pharmacology', 'goals', 'schedule'
+    'dashboard', 'purchases', 'fashion', 'skincare', 'pharmacology', 'goals', 'schedule', 'ai_interface'
 }
 
 
@@ -835,6 +849,46 @@ def ai_build_routine():
         'items': plan.get('items', []),
         'created_page_key': created_page_key,
         'created_items': created_items
+    })
+
+
+@app.route('/api/ai/query', methods=['POST'])
+def ai_query():
+    data, error = get_json_payload(required_fields=['prompt'])
+    if error:
+        return error
+
+    prompt = str(data.get('prompt') or '').strip()
+    if not prompt:
+        return api_error('prompt is required', 400)
+
+    include_schedule_context = 1 if int(data.get('include_schedule_context', 0) or 0) else 0
+    history = data.get('history') if isinstance(data.get('history'), list) else []
+
+    context = {
+        'history': history,
+    }
+
+    db = get_db()
+    if include_schedule_context:
+        schedule_rows = db.execute(
+            '''
+            SELECT ci.id, ci.name, ci.task_time, ci.task_interval, ci.subgroup, ss.label AS section_label, ci.section_key
+            FROM custom_items ci
+            JOIN sidebar_sections ss ON ci.section_key = ss.page_key
+            WHERE ss.is_schedule = 1 AND ci.is_task = 1
+            ORDER BY ci.section_key, ci.sort_order, ci.name
+            LIMIT 200
+            '''
+        ).fetchall()
+        context['schedule_tasks'] = rows_to_list(schedule_rows)
+    db.close()
+
+    result = query_ai(prompt, context)
+    return jsonify({
+        'ok': True,
+        'mode': result.get('mode', 'heuristic'),
+        'answer': result.get('answer', ''),
     })
 
 

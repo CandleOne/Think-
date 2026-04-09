@@ -250,6 +250,158 @@ def _call_ai_json(system_prompt: str, user_prompt: str) -> tuple[str, dict[str, 
     return "heuristic", None
 
 
+def _call_openai_text(system_prompt: str, user_prompt: str) -> str | None:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    model = os.environ.get("OPENAI_MODEL") or os.environ.get("AI_BRAIN_MODEL") or "gpt-4o-mini"
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.3,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib_request.Request(
+        f"{base_url}/chat/completions",
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+
+    try:
+        with urllib_request.urlopen(req, timeout=45) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            return str(body["choices"][0]["message"]["content"]).strip()
+    except Exception:
+        return None
+
+
+def _call_claude_text(system_prompt: str, user_prompt: str) -> str | None:
+    api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY")
+    if not api_key:
+        return None
+
+    base_url = os.environ.get("CLAUDE_BASE_URL", "https://api.anthropic.com/v1").rstrip("/")
+    model = os.environ.get("CLAUDE_MODEL") or os.environ.get("AI_BRAIN_MODEL") or "claude-3-7-sonnet-latest"
+
+    payload = {
+        "model": model,
+        "max_tokens": 1800,
+        "temperature": 0.3,
+        "system": system_prompt,
+        "messages": [
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib_request.Request(
+        f"{base_url}/messages",
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": os.environ.get("ANTHROPIC_VERSION", "2023-06-01"),
+        },
+    )
+
+    try:
+        with urllib_request.urlopen(req, timeout=45) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            content = body.get("content") or []
+            text_parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            out = "\n".join(text_parts).strip()
+            return out or None
+    except Exception:
+        return None
+
+
+def query_ai(prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    context = context or {}
+    clean_prompt = str(prompt or "").strip()
+    if not clean_prompt:
+        return {
+            "mode": "heuristic",
+            "answer": "Please provide a question or request.",
+        }
+
+    history = context.get("history") if isinstance(context.get("history"), list) else []
+    trimmed_history = []
+    for msg in history[-8:]:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "user")
+        content = str(msg.get("content") or "").strip()
+        if content:
+            trimmed_history.append({"role": role, "content": content[:1000]})
+
+    provider, _, configured = _get_provider_env()
+    system_prompt = (
+        "You are the planning assistant for a life optimization app. "
+        "Give practical, actionable, concise advice. "
+        "When appropriate, provide numbered steps and mention tradeoffs briefly."
+    )
+    user_payload = {
+        "question": clean_prompt,
+        "history": trimmed_history,
+        "context": context,
+    }
+    user_prompt = json.dumps(user_payload, ensure_ascii=True)
+
+    text: str | None = None
+    active_mode = provider
+    if provider == "claude" and configured:
+        text = _call_claude_text(system_prompt, user_prompt)
+    elif provider == "openai" and configured:
+        text = _call_openai_text(system_prompt, user_prompt)
+    elif provider == "heuristic":
+        text = None
+    else:
+        text = _call_claude_text(system_prompt, user_prompt) or _call_openai_text(system_prompt, user_prompt)
+        if text:
+            active_mode = "claude" if (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY")) else "openai"
+
+    if text:
+        return {
+            "mode": active_mode,
+            "answer": text,
+        }
+
+    lower = clean_prompt.lower()
+    if "schedule" in lower or "routine" in lower:
+        answer = (
+            "Use AI Optimize Tasks first to rebalance timing, then apply only the updates that improve flow. "
+            "For routine creation, define one outcome, one cadence, and one review checkpoint to keep it sustainable."
+        )
+    elif "goal" in lower or "objective" in lower:
+        answer = (
+            "Break your objective into weekly milestones, map each milestone to 1-3 repeatable tasks, "
+            "and track completion in the long-term objective timeline."
+        )
+    else:
+        answer = (
+            "AI provider is not configured, so this is heuristic mode. Ask for schedule optimization, routine design, "
+            "or objective planning and I will provide structured recommendations."
+        )
+
+    return {
+        "mode": "heuristic",
+        "answer": answer,
+    }
+
+
 def optimize_schedule(tasks: list[dict[str, Any]], preferences: dict[str, Any] | None = None) -> PlanResult:
     preferences = preferences or {}
     provider, llm_result = _call_ai_json(
