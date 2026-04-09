@@ -871,7 +871,10 @@ async function renderCustomSection(c, sectionKey) {
   c.innerHTML = `
     <div class="page-header">
       <h2>${esc(titleText)}</h2>
-      <button class="btn btn-primary" onclick="openCustomItemModal('${esc(sectionKey)}')">${addLabel}</button>
+      <div style="display:flex;gap:8px">
+        ${isLongTermPage ? `<button class="btn" onclick="exportLongTermRoadmap('${esc(sectionKey)}', '${esc(label)}')">Export Roadmap as TXT</button>` : ''}
+        <button class="btn btn-primary" onclick="openCustomItemModal('${esc(sectionKey)}')">${addLabel}</button>
+      </div>
     </div>
     ${isLongTermPage ? `<div class="card-subtitle" style="margin-bottom:14px">${totalObjectives} long-term objectives tracked in this roadmap. ${completedObjectives} completed.</div>` : ''}
     <div class="legend">
@@ -897,6 +900,68 @@ async function renderCustomSection(c, sectionKey) {
         </ul>
         ${items.length === 0 ? '<div class="empty-state">No items yet. Click + to add one.</div>' : ''}
       </div>`}`;
+}
+
+async function exportLongTermRoadmap(sectionKey, label) {
+  const section = sidebarSections.find(s => s.page_key === sectionKey);
+  const isLongTermPage = section ? Number(section.is_long_term_section || 0) === 1 : false;
+  if (!isLongTermPage) {
+    toast('TXT export is available only for long-term objective sections');
+    return;
+  }
+
+  const items = await getList('custom/' + sectionKey, 'Failed to load custom items', { toastOnError: true });
+  if (items.length === 0) {
+    toast('No objectives found to export');
+    return;
+  }
+
+  const lines = [];
+  const now = new Date().toLocaleString();
+  const objectives = items.filter(it => !String(it.name || '').startsWith('━━━') && Number(it.is_long_term_objective || 0) === 1);
+  const completed = objectives.filter(it => Number(it.objective_completed || 0) === 1).length;
+
+  lines.push(`Roadmap: ${label}`);
+  lines.push(`Exported: ${now}`);
+  lines.push(`Objectives: ${objectives.length}`);
+  lines.push(`Completed: ${completed}`);
+  lines.push('');
+
+  let currentHeader = null;
+  for (const it of items) {
+    const name = String(it.name || '');
+    if (name.startsWith('━━━')) {
+      currentHeader = name.replace(/━/g, '').trim();
+      lines.push(`## ${currentHeader}`);
+      if (it.notes) lines.push(it.notes);
+      lines.push('');
+      continue;
+    }
+
+    if (Number(it.is_long_term_objective || 0) !== 1) continue;
+    const done = Number(it.objective_completed || 0) === 1 ? '[x]' : '[ ]';
+    lines.push(`${done} ${name}`);
+    if (it.status_name) lines.push(`  Status: ${it.status_name}`);
+    if (it.link) lines.push(`  Link: ${it.link}`);
+    if (it.notes) {
+      for (const noteLine of String(it.notes).split('\n')) {
+        lines.push(`  ${noteLine}`);
+      }
+    }
+    lines.push('');
+  }
+
+  const text = lines.join('\n').trim() + '\n';
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  const safeLabel = String(label || 'roadmap').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${safeLabel || 'roadmap'}_roadmap.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+  toast('Roadmap exported as TXT');
 }
 
 async function openCustomItemModal(sectionKey, editId) {
