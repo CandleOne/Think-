@@ -43,13 +43,13 @@ def add(name, status, notes='', is_long_term_objective=0):
 add('━━━ EXECUTION ASSUMPTIONS ━━━', GREEN,
     'Expanded Financial Theory roadmap converted into day-by-day long-term objectives with checkpoints and certifications.')
 add('Baseline weekly commitment', GREEN,
-    'Weekdays: 1.5h/day. Saturday: 3h. Sunday: off/review only. Total ~10.5h/week.', 1)
+    'Weekdays: 1.5h/day. Saturday: 3h. Sunday: off/review only. Total ~10.5h/week.')
 add('Program start anchor', BLUE,
-    'Assumed start: Monday, April 14, 2026. Shift all dates if your actual start changes.', 1)
+    'Assumed start: Monday, April 14, 2026. Shift all dates if your actual start changes.')
 add('Retention rule', GREEN,
-    'Every 7th day is review only. No new material on review day.', 1)
+    'Every 7th day is review only. No new material on review day.')
 add('Total horizon to PM-ready', BLUE,
-    '~12 months, ~450 total study hours with review and buffer days included.', 1)
+    '~12 months, ~450 total study hours with review and buffer days included.')
 
 # ===== Phase 0 =====
 add('━━━ PHASE 0: COMPLETE ESSENTIALS OF CORPORATE FINANCE ━━━', GREEN,

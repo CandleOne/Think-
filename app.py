@@ -113,13 +113,18 @@ def ensure_schema_compatibility():
                 (max_order + 1,),
             )
 
-        # For existing Financial Theory data, default non-header rows to long-term objectives.
+        # For existing Financial Theory data, default non-header rows to long-term objectives,
+        # but skip Execution Assumptions items (they are reference info, not completable steps).
         conn.execute('''
             UPDATE custom_items
             SET is_long_term_objective = 1
             WHERE section_key = 'custom_financial_theory'
               AND COALESCE(is_long_term_objective, 0) = 0
               AND name NOT LIKE '━━━%'
+              AND sort_order > COALESCE(
+                  (SELECT sort_order FROM custom_items
+                   WHERE section_key = 'custom_financial_theory' AND name LIKE '%PHASE 0%'
+                   LIMIT 1), 0)
         ''')
         conn.execute('''
             UPDATE sidebar_sections
