@@ -1043,6 +1043,26 @@ async function renderCustomSection(c, sectionKey) {
   });
   if (current.header || current.items.length) groups.push(current);
 
+  const ltoLockedById = {};
+  const ltoLockReasonById = {};
+  if (isLongTermPage) {
+    groups.forEach(g => {
+      let firstIncompleteName = null;
+      g.items.forEach(it => {
+        if (Number(it.is_long_term_objective || 0) !== 1) return;
+        const done = Number(it.objective_completed || 0) === 1;
+        if (!done && firstIncompleteName) {
+          ltoLockedById[it.id] = 1;
+          ltoLockReasonById[it.id] = firstIncompleteName;
+          return;
+        }
+        if (!done && !firstIncompleteName) {
+          firstIncompleteName = String(it.name || 'prior objective');
+        }
+      });
+    });
+  }
+
   function renderNotes(notes) {
     if (!notes) return '';
     return `<div class="item-notes">${esc(notes).replace(/\n/g, '<br>')}</div>`;
@@ -1054,7 +1074,11 @@ async function renderCustomSection(c, sectionKey) {
     const taskInfo = it.is_task ? `<div class="task-schedule">${it.is_quick_objective ? '<em>anytime</em>' : esc(it.task_time || '')}${it.task_count ? ` · ${it.task_count}×` : ''}${it.task_interval ? ` ${esc(it.task_interval)}` : ''}${it.subgroup ? ` · ${esc(it.subgroup)}` : ''}</div>` : '';
     const optimizeBtn = (it.is_task && !it.is_quick_objective) ? `<button class="btn-icon" onclick="event.stopPropagation(); optimizeTask('${esc(sKey)}', ${it.id})" title="Optimize within schedule">⏱</button>` : '';
     const isDone = Number(it.objective_completed || 0) === 1;
-    const completeBtn = `<button class="btn btn-sm ${isDone ? '' : 'btn-primary'}" onclick="toggleObjectiveComplete('${esc(sKey)}', ${it.id}, ${isDone ? 1 : 0})">${isDone ? 'Undo Complete' : 'Complete Objective'}</button>`;
+    const isLocked = Number(ltoLockedById[it.id] || 0) === 1 && !isDone;
+    const lockReason = String(ltoLockReasonById[it.id] || 'Complete prior objective first');
+    const completeBtn = isLocked
+      ? `<button class="btn btn-sm" disabled title="Complete prior objective first">🔒 Locked</button>`
+      : `<button class="btn btn-sm ${isDone ? '' : 'btn-primary'}" onclick="toggleObjectiveComplete('${esc(sKey)}', ${it.id}, ${isDone ? 1 : 0})">${isDone ? 'Undo Complete' : 'Complete Objective'}</button>`;
 
     if (isLongTermPage && Number(it.is_long_term_objective || 0) === 1) {
       return `<li class="custom-item lto-item ${isDone ? 'lto-done' : ''}" draggable="true" data-item-id="${it.id}"
@@ -1075,6 +1099,7 @@ async function renderCustomSection(c, sectionKey) {
             <button class="btn-icon" onclick="openCustomItemModal('${esc(sKey)}', ${it.id})">✎</button>
             <button class="btn-icon btn-danger" onclick="deleteCustomItem('${esc(sKey)}', ${it.id})">✕</button>
           </div>
+          ${isLocked ? `<div class="lto-notes" style="color:var(--orange)">Locked until completed: ${esc(lockReason)}</div>` : ''}
           ${taskInfo}
           ${it.notes ? `<div class="lto-notes">${esc(it.notes).replace(/\n/g, '<br>')}</div>` : ''}
         </div>

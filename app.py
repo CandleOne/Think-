@@ -1560,6 +1560,65 @@ def set_custom_objective_completed(section_key, item_id):
     is_completed = 1 if is_completed else 0
     db = get_db()
     try:
+        item = db.execute(
+            '''
+            SELECT id, name, sort_order, is_long_term_objective, objective_completed
+            FROM custom_items
+            WHERE id=? AND section_key=?
+            ''',
+            (item_id, section_key)
+        ).fetchone()
+        if not item:
+            return api_error('Custom item not found', 404)
+
+        # Lock progression for long-term objectives: you cannot complete a later objective
+        # until all prior objectives in the same phase are completed.
+        if is_completed and int(item['is_long_term_objective'] or 0) == 1:
+            prev_header = db.execute(
+                '''
+                SELECT sort_order
+                FROM custom_items
+                WHERE section_key=? AND name LIKE '━━━%' AND sort_order < ?
+                ORDER BY sort_order DESC
+                LIMIT 1
+                ''',
+                (section_key, item['sort_order'])
+            ).fetchone()
+            next_header = db.execute(
+                '''
+                SELECT sort_order
+                FROM custom_items
+                WHERE section_key=? AND name LIKE '━━━%' AND sort_order > ?
+                ORDER BY sort_order ASC
+                LIMIT 1
+                ''',
+                (section_key, item['sort_order'])
+            ).fetchone()
+
+            lower_bound = int(prev_header['sort_order']) if prev_header else -1
+            upper_bound = int(next_header['sort_order']) if next_header else 10**9
+
+            blocking = db.execute(
+                '''
+                SELECT id, name
+                FROM custom_items
+                WHERE section_key=?
+                  AND COALESCE(is_long_term_objective, 0) = 1
+                  AND name NOT LIKE '━━━%'
+                  AND sort_order > ?
+                  AND sort_order < ?
+                  AND sort_order < ?
+                  AND COALESCE(objective_completed, 0) = 0
+                ORDER BY sort_order ASC, id ASC
+                LIMIT 1
+                ''',
+                (section_key, lower_bound, upper_bound, item['sort_order'])
+            ).fetchone()
+
+            if blocking:
+                db.rollback()
+                return api_error(f"Complete prior objective first: {blocking['name']}", 409)
+
         cur = db.execute(
             'UPDATE custom_items SET objective_completed=?, updated_at=datetime(\'now\') WHERE id=? AND section_key=?',
             (is_completed, item_id, section_key)
