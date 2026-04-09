@@ -166,6 +166,34 @@ a:hover { text-decoration: underline; }
 .spin { display: inline-block; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Goal Archive */
+.term-section { margin-bottom: 24px; }
+.term-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.term-badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; padding: 3px 8px; border-radius: 20px; }
+.term-badge.overdue { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid var(--red); }
+.term-badge.short { background: rgba(248,81,73,0.1); color: var(--orange); border: 1px solid var(--orange); }
+.term-badge.medium { background: rgba(88,166,255,0.1); color: var(--blue); border: 1px solid var(--blue); }
+.term-badge.long { background: rgba(63,185,80,0.1); color: var(--green); border: 1px solid var(--green); }
+.term-subtitle { font-size: 12px; color: var(--text-muted); }
+.term-count { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+.archive-goal-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; margin-bottom: 8px; display: flex; align-items: flex-start; gap: 12px; }
+.archive-goal-card.completed-card { opacity: 0.55; }
+.archive-goal-card .agc-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+.archive-goal-card .agc-body { flex: 1; min-width: 0; }
+.archive-goal-card .agc-title { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+.archive-goal-card .agc-title.done { text-decoration: line-through; color: var(--text-muted); }
+.archive-goal-card .agc-desc { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.archive-goal-card .agc-tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.agc-tag { font-size: 11px; padding: 2px 7px; border-radius: 4px; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
+.agc-tag.area { color: var(--accent); border-color: rgba(88,166,255,0.3); }
+.agc-tag.date { color: var(--text-muted); }
+.agc-tag.date.overdue { color: var(--red); }
+.archive-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; align-items: center; }
+.filter-chip { font-size: 12px; padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border); cursor: pointer; color: var(--text-muted); background: var(--surface); transition: all 0.15s; user-select: none; }
+.filter-chip:hover { border-color: var(--accent); color: var(--accent); }
+.filter-chip.active { background: var(--accent); color: #0d1117; border-color: var(--accent); font-weight: 600; }
+.archive-empty { color: var(--text-muted); font-size: 13px; padding: 12px 0; }
+
 /* Custom items with notes */
 .custom-item { margin-bottom: 4px; cursor: grab; }
 .custom-item[draggable] { transition: opacity 0.15s, border-color 0.15s; }
