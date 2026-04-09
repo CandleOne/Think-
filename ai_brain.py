@@ -811,6 +811,253 @@ def analyze_goals(goals: list[dict[str, Any]]) -> dict[str, Any]:
     return _heuristic_analyze_goals(goals)
 
 
+def _estimate_candidate_minutes(item: dict[str, Any]) -> int:
+    hours = item.get("time_commitment_hours")
+    try:
+        if hours is not None:
+            h = float(hours)
+            if h > 0:
+                # Suggest a practical single-session slice, not total project hours.
+                return max(25, min(120, int(round((h * 60) / 20))))
+    except (TypeError, ValueError):
+        pass
+
+    kind = str(item.get("item_kind") or "").lower()
+    if kind == "task":
+        return 35
+    if kind == "long_term_objective":
+        return 50
+
+    difficulty = int(item.get("difficulty") or 0)
+    if difficulty >= 8:
+        return 75
+    if difficulty >= 5:
+        return 55
+    if difficulty >= 3:
+        return 40
+    return 30
+
+
+def _score_today_candidate(item: dict[str, Any], today_iso: str) -> float:
+    ai_score = item.get("ai_priority_score")
+    try:
+        ai_val = float(ai_score)
+    except (TypeError, ValueError):
+        ai_val = 0.0
+
+    priority = int(item.get("priority") or 0)
+    difficulty = int(item.get("difficulty") or 0)
+    target = str(item.get("target_date") or "")[:10]
+
+    due_boost = 0.0
+    if target:
+        if target < today_iso:
+            due_boost = 35.0
+        elif target == today_iso:
+            due_boost = 28.0
+        else:
+            due_boost = 8.0
+
+    base = ai_val if ai_val > 0 else (priority * 30 + due_boost)
+    return base - (difficulty * 1.2)
+
+
+def _heuristic_build_today_plan(
+    schedule_tasks: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    now_iso: str,
+    end_hour: int,
+) -> dict[str, Any]:
+    now_dt = datetime.fromisoformat(now_iso.replace("Z", "+00:00")) if now_iso else datetime.utcnow()
+    now_min = now_dt.hour * 60 + now_dt.minute
+    day_end = max(now_min + 30, min(24 * 60, int(end_hour) * 60))
+    today_iso = now_dt.strftime("%Y-%m-%d")
+
+    occupied: list[tuple[int, int]] = []
+    for t in schedule_tasks:
+        start = _parse_time_to_minutes(str(t.get("task_time") or ""))
+        if start is None:
+            continue
+        duration = _default_duration_for_task(t)
+        end = min(day_end, start + duration)
+        if end <= now_min:
+            continue
+        occupied.append((max(now_min, start), end))
+
+    occupied.sort(key=lambda x: x[0])
+    merged: list[list[int]] = []
+    for start, end in occupied:
+        if not merged or start > merged[-1][1]:
+            merged.append([start, end])
+        else:
+            merged[-1][1] = max(merged[-1][1], end)
+
+    free_slots: list[dict[str, int]] = []
+    cursor = now_min
+    for start, end in merged:
+        if start > cursor:
+            free_slots.append({"start": cursor, "end": start})
+        cursor = max(cursor, end)
+    if cursor < day_end:
+        free_slots.append({"start": cursor, "end": day_end})
+
+    total_free = sum(max(0, s["end"] - s["start"]) for s in free_slots)
+
+    ranked = []
+    for c in candidates:
+        if int(c.get("is_completed") or 0):
+            continue
+        minutes = _estimate_candidate_minutes(c)
+        score = _score_today_candidate(c, today_iso)
+        ranked.append({**c, "session_minutes": minutes, "score": score})
+
+    ranked.sort(key=lambda x: (-x["score"], x["session_minutes"], str(x.get("title") or "").lower()))
+
+    slots = [{"start": s["start"], "end": s["end"]} for s in free_slots]
+
+    def allocate(minutes: int) -> tuple[int, int] | None:
+        for slot in slots:
+            cap = slot["end"] - slot["start"]
+            if cap >= minutes:
+                out = (slot["start"], slot["start"] + minutes)
+                slot["start"] += minutes
+                return out
+        return None
+
+    recommendations: list[dict[str, Any]] = []
+    for cand in ranked:
+        allocation = allocate(int(cand["session_minutes"]))
+        if not allocation:
+            continue
+        start_min, end_min = allocation
+        recommendations.append(
+            {
+                "archive_id": str(cand.get("archive_id") or ""),
+                "source_type": str(cand.get("source_type") or ""),
+                "item_kind": str(cand.get("item_kind") or ""),
+                "id": cand.get("id"),
+                "title": str(cand.get("title") or ""),
+                "description": cand.get("description"),
+                "area_name": str(cand.get("area_name") or ""),
+                "target_date": cand.get("target_date"),
+                "section_key": cand.get("section_key"),
+                "planned_start": _minutes_to_12h(start_min),
+                "planned_end": _minutes_to_12h(end_min),
+                "planned_minutes": int(cand["session_minutes"]),
+                "score": round(float(cand["score"]), 1),
+                "reason": "Best fit for available time and priority.",
+                "ai_reasoning": str(cand.get("ai_reasoning") or ""),
+            }
+        )
+        if len(recommendations) >= 6:
+            break
+
+    return {
+        "mode": "heuristic",
+        "summary": f"Planned {len(recommendations)} focus block(s) in {total_free} free minute(s).",
+        "free_minutes": total_free,
+        "recommendations": recommendations,
+    }
+
+
+def build_today_plan(
+    schedule_tasks: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    now_iso: str,
+    end_hour: int = 22,
+) -> dict[str, Any]:
+    """Build a today plan combining schedule occupancy and archive candidates."""
+    heuristic = _heuristic_build_today_plan(schedule_tasks, candidates, now_iso, end_hour)
+
+    provider, result = _call_ai_json(
+        system_prompt=(
+            "You are a daily planning assistant. Given fixed scheduled tasks and candidate goals/tasks, "
+            "select the best candidates that fit into today's free windows. "
+            "Return JSON with keys: summary (string), recommendations (array). "
+            "Each recommendation must include: archive_id, reason. "
+            "Optional: planned_start (H:MM AM/PM), planned_end (H:MM AM/PM), planned_minutes (int)."
+        ),
+        user_prompt=json.dumps(
+            {
+                "now_iso": now_iso,
+                "end_hour": end_hour,
+                "scheduled": [
+                    {
+                        "id": t.get("id"),
+                        "title": t.get("name") or t.get("title"),
+                        "task_time": t.get("task_time"),
+                        "subgroup": t.get("subgroup"),
+                    }
+                    for t in schedule_tasks
+                ],
+                "candidates": [
+                    {
+                        "archive_id": c.get("archive_id"),
+                        "id": c.get("id"),
+                        "title": c.get("title"),
+                        "source_type": c.get("source_type"),
+                        "item_kind": c.get("item_kind"),
+                        "priority": c.get("priority"),
+                        "difficulty": c.get("difficulty"),
+                        "target_date": c.get("target_date"),
+                        "ai_priority_score": c.get("ai_priority_score"),
+                        "estimated_minutes": _estimate_candidate_minutes(c),
+                    }
+                    for c in candidates
+                    if not int(c.get("is_completed") or 0)
+                ],
+                "fallback_heuristic": heuristic,
+            },
+            ensure_ascii=True,
+        ),
+        max_tokens=1800,
+    )
+
+    if result and isinstance(result.get("recommendations"), list):
+        by_archive_id = {str(c.get("archive_id") or ""): c for c in candidates}
+        clean_recs: list[dict[str, Any]] = []
+        for rec in result.get("recommendations", []):
+            if not isinstance(rec, dict):
+                continue
+            aid = str(rec.get("archive_id") or "")
+            if not aid or aid not in by_archive_id:
+                continue
+            src = by_archive_id[aid]
+            minutes = rec.get("planned_minutes")
+            try:
+                minutes_val = int(minutes) if minutes is not None else _estimate_candidate_minutes(src)
+            except (TypeError, ValueError):
+                minutes_val = _estimate_candidate_minutes(src)
+            clean_recs.append(
+                {
+                    "archive_id": aid,
+                    "source_type": str(src.get("source_type") or ""),
+                    "item_kind": str(src.get("item_kind") or ""),
+                    "id": src.get("id"),
+                    "title": str(src.get("title") or ""),
+                    "description": src.get("description"),
+                    "area_name": str(src.get("area_name") or ""),
+                    "target_date": src.get("target_date"),
+                    "section_key": src.get("section_key"),
+                    "planned_start": rec.get("planned_start"),
+                    "planned_end": rec.get("planned_end"),
+                    "planned_minutes": max(15, min(180, minutes_val)),
+                    "score": _score_today_candidate(src, datetime.utcnow().strftime("%Y-%m-%d")),
+                    "reason": str(rec.get("reason") or "AI selected this as a strong fit for today."),
+                    "ai_reasoning": str(src.get("ai_reasoning") or ""),
+                }
+            )
+        if clean_recs:
+            return {
+                "mode": provider,
+                "summary": str(result.get("summary") or f"AI selected {len(clean_recs)} item(s) for today."),
+                "free_minutes": heuristic.get("free_minutes", 0),
+                "recommendations": clean_recs,
+            }
+
+    return heuristic
+
+
 def optimize_schedule(tasks: list[dict[str, Any]], preferences: dict[str, Any] | None = None) -> PlanResult:
     preferences = preferences or {}
     provider, llm_result = _call_ai_json(

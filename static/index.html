@@ -2116,7 +2116,7 @@ async function renderGoalArchive(c) {
     return base - (d * 1.2);
   }
 
-  function buildPage() {
+  async function buildPage() {
     const filtered = filterGoals(entries);
     const totalActive = entries.filter(g => !g.is_completed).length;
     const totalDone = entries.filter(g => g.is_completed).length;
@@ -2132,129 +2132,27 @@ async function renderGoalArchive(c) {
           }</span>`).join('')}
       </div>`;
 
-    const now = nowInTZ();
-    const nowMin = now.getHours() * 60 + now.getMinutes();
-    const dayEnd = 22 * 60;
-    const defaultTaskMinutes = 45;
-
-    function fmtMin(m) {
-      const safe = ((m % (24 * 60)) + (24 * 60)) % (24 * 60);
-      let h = Math.floor(safe / 60);
-      const mm = safe % 60;
-      const ap = h >= 12 ? 'PM' : 'AM';
-      h = h % 12 || 12;
-      return `${h}:${String(mm).padStart(2, '0')} ${ap}`;
-    }
-
-    const todaySchedule = entries
-      .filter(g => g.source_type === 'custom_item' && g.item_kind === 'task' && Number(g.is_schedule_section || 0) === 1 && !g.is_completed)
-      .slice()
-      .sort((a, b) => {
-        const ta = parse12hToMin(a.task_time);
-        const tb = parse12hToMin(b.task_time);
-        if (ta !== null && tb !== null && ta !== tb) return ta - tb;
-        if (ta !== null && tb === null) return -1;
-        if (ta === null && tb !== null) return 1;
-        return String(a.title || '').localeCompare(String(b.title || ''));
+    let todayPlanRes = null;
+    if (_archiveFilter === 'today') {
+      todayPlanRes = await api('ai/today-plan', {
+        method: 'POST',
+        body: {
+          now_iso: new Date().toISOString(),
+          timezone: getTimezone(),
+          end_hour: 22,
+        },
       });
-
-    const timedSchedule = todaySchedule
-      .map(t => {
-        const start = parse12hToMin(t.task_time);
-        return {
-          ...t,
-          start,
-          end: start == null ? null : Math.min(dayEnd, start + defaultTaskMinutes),
-        };
-      })
-      .filter(t => t.start != null)
-      .sort((a, b) => (a.start - b.start));
-
-    const remainingTimed = timedSchedule.filter(t => t.end > nowMin);
-    const scheduledRemainingMinutes = remainingTimed.reduce((acc, t) => {
-      const s = Math.max(t.start, nowMin);
-      return acc + Math.max(0, t.end - s);
-    }, 0);
-
-    const remainingWindowMinutes = Math.max(0, dayEnd - nowMin);
-
-    // Build free windows between now and end of day using timed tasks as occupied blocks.
-    const occupied = remainingTimed.map(t => ({
-      start: Math.max(nowMin, t.start),
-      end: Math.min(dayEnd, t.end),
-    })).filter(b => b.end > b.start);
-
-    const merged = [];
-    for (const b of occupied) {
-      if (!merged.length || b.start > merged[merged.length - 1].end) {
-        merged.push({ ...b });
-      } else {
-        merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, b.end);
-      }
     }
 
-    const freeSlots = [];
-    let cursor = nowMin;
-    for (const b of merged) {
-      if (b.start > cursor) freeSlots.push({ start: cursor, end: b.start });
-      cursor = Math.max(cursor, b.end);
-    }
-    if (cursor < dayEnd) freeSlots.push({ start: cursor, end: dayEnd });
-
-    let goalBudgetMinutes = freeSlots.reduce((acc, s) => acc + Math.max(0, s.end - s.start), 0);
-    goalBudgetMinutes = Math.min(goalBudgetMinutes, 240);
-
-    const unscheduledTodayTasks = todaySchedule.filter(t => parse12hToMin(t.task_time) == null);
-    const reserveForUnscheduled = Math.min(goalBudgetMinutes, unscheduledTodayTasks.length * 25);
-    goalBudgetMinutes = Math.max(0, goalBudgetMinutes - reserveForUnscheduled);
-
-    const allocSlots = freeSlots.map(s => ({ ...s }));
-
-    function allocateInFreeSlots(minutes) {
-      for (const s of allocSlots) {
-        const cap = s.end - s.start;
-        if (cap >= minutes) {
-          const out = { start: s.start, end: s.start + minutes };
-          s.start += minutes;
-          return out;
-        }
-      }
-      return null;
-    }
-
-    const goalCandidates = entries
-      .filter(g => g.source_type === 'goal' && !g.is_completed)
-      .map(g => {
-        const sessionMinutes = estimateGoalSessionMinutes(g);
-        return {
-          ...g,
-          sessionMinutes,
-          opportunityScore: goalOpportunityScore(g, todayIso),
-        };
-      })
-      .sort((a, b) => {
-        if (b.opportunityScore !== a.opportunityScore) return b.opportunityScore - a.opportunityScore;
-        return a.sessionMinutes - b.sessionMinutes;
-      });
-
-    const recommendedGoals = [];
-    let usedMinutes = 0;
-    for (const g of goalCandidates) {
-      if (usedMinutes + g.sessionMinutes > goalBudgetMinutes) continue;
-      const slot = allocateInFreeSlots(g.sessionMinutes);
-      if (!slot) continue;
-      recommendedGoals.push({ ...g, suggested_start: slot.start, suggested_end: slot.end });
-      usedMinutes += g.sessionMinutes;
-      if (recommendedGoals.length >= 4) break;
-    }
-    if (!recommendedGoals.length && goalCandidates.length) {
-      const fallback = goalCandidates[0];
-      const slot = allocateInFreeSlots(Math.min(fallback.sessionMinutes, 30));
-      if (slot) {
-        recommendedGoals.push({ ...fallback, suggested_start: slot.start, suggested_end: slot.end });
-        usedMinutes = slot.end - slot.start;
-      }
-    }
+    const todaySchedule = (todayPlanRes && !apiHasError(todayPlanRes) && Array.isArray(todayPlanRes.schedule))
+      ? todayPlanRes.schedule
+      : [];
+    const recommendedGoals = (todayPlanRes && !apiHasError(todayPlanRes) && Array.isArray(todayPlanRes.recommendations))
+      ? todayPlanRes.recommendations
+      : [];
+    const freeMinutes = Number(todayPlanRes?.free_minutes || 0);
+    const candidatesConsidered = Number(todayPlanRes?.candidates_considered || 0);
+    const planSummary = String(todayPlanRes?.summary || '');
 
     const scheduleCards = todaySchedule.map(g => {
       const sectionKeyArg = JSON.stringify(String(g.section_key || ''));
@@ -2278,6 +2176,9 @@ async function renderGoalArchive(c) {
     const goalCards = recommendedGoals.map(g => {
       const dueToday = g.target_date && String(g.target_date).slice(0, 10) === todayIso;
       const overdue = g.target_date && String(g.target_date).slice(0, 10) < todayIso;
+      const reason = g.reason || g.ai_reasoning || '';
+      const isEditableGoal = g.source_type === 'goal';
+      const sectionKeyArg = JSON.stringify(String(g.section_key || ''));
       return `
         <div class="archive-goal-card">
           <div class="agc-status" style="background:var(--orange)"></div>
@@ -2286,16 +2187,21 @@ async function renderGoalArchive(c) {
             ${g.description ? `<div class="agc-desc">${esc(g.description)}</div>` : ''}
             <div class="agc-tags">
               <span class="agc-tag area">${esc(g.area_name || '')}</span>
-              <span class="agc-tag">~${g.sessionMinutes} min block</span>
-              <span class="agc-tag">score ${Math.round(g.opportunityScore)}</span>
-                ${g.suggested_start != null ? `<span class="agc-tag">🕒 ${fmtMin(g.suggested_start)} - ${fmtMin(g.suggested_end)}</span>` : ''}
+              <span class="agc-tag">~${Math.round(Number(g.planned_minutes || 0))} min block</span>
+              ${g.score != null ? `<span class="agc-tag">score ${Math.round(Number(g.score || 0))}</span>` : ''}
+              ${(g.planned_start && g.planned_end) ? `<span class="agc-tag">🕒 ${esc(g.planned_start)} - ${esc(g.planned_end)}</span>` : ''}
               ${g.target_date ? `<span class="agc-tag date ${overdue ? 'overdue' : ''}">📅 ${esc(g.target_date)}${dueToday ? ' (today)' : (overdue ? ' ⚠' : '')}</span>` : ''}
             </div>
-            ${g.ai_reasoning ? `<div class="today-goal-score" style="margin-top:6px">${esc(g.ai_reasoning)}</div>` : ''}
+            ${reason ? `<div class="today-goal-score" style="margin-top:6px">${esc(reason)}</div>` : ''}
           </div>
           <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
-            <button class="btn-icon" onclick="openGoalModal(${g.id})" title="Edit">✎</button>
-            <button class="btn-icon btn-danger" onclick="archiveToggleGoal(${g.id},1)" title="Complete">✓</button>
+            ${isEditableGoal ? `
+              <button class="btn-icon" onclick="openGoalModal(${g.id})" title="Edit">✎</button>
+              <button class="btn-icon btn-danger" onclick="archiveToggleGoal(${g.id},1)" title="Complete">✓</button>
+            ` : ''}
+            ${(!isEditableGoal && g.section_key) ? `
+              <button class="btn-icon" onclick='loadPage(${sectionKeyArg})' title="Open section">↗</button>
+            ` : ''}
           </div>
         </div>`;
     }).join('');
@@ -2366,16 +2272,17 @@ async function renderGoalArchive(c) {
         ? `<div class="term-section">
              <div class="term-header">
                <span class="term-badge short">Today Plan</span>
-               <span class="term-subtitle">Blend of your schedule and best goals to tackle today</span>
+               <span class="term-subtitle">Live schedule + AI-selected archive tasks/goals that fit your remaining day</span>
                <span class="term-count">${todayIso}</span>
              </div>
              <div class="today-stats">
                <span class="today-stat">Now: ${formatLiveClock()}</span>
-               <span class="today-stat">Remaining window: ${Math.floor(remainingWindowMinutes / 60)}h ${remainingWindowMinutes % 60}m</span>
-               <span class="today-stat">Scheduled load: ${Math.floor(scheduledRemainingMinutes / 60)}h ${scheduledRemainingMinutes % 60}m</span>
-               <span class="today-stat">Unscheduled tasks: ${unscheduledTodayTasks.length}</span>
-               <span class="today-stat">Goal budget: ${Math.floor(goalBudgetMinutes / 60)}h ${goalBudgetMinutes % 60}m</span>
+               <span class="today-stat">Schedule tasks: ${todaySchedule.length}</span>
+               <span class="today-stat">Candidates checked: ${candidatesConsidered}</span>
+               <span class="today-stat">Free time detected: ${Math.floor(freeMinutes / 60)}h ${freeMinutes % 60}m</span>
+               <span class="today-stat">AI picks: ${recommendedGoals.length}</span>
              </div>
+             ${planSummary ? `<div class="today-meta" style="margin-bottom:12px">${esc(planSummary)}</div>` : ''}
              <div class="today-combo">
                <div class="today-col">
                  <h4>Today's Schedule</h4>
@@ -2392,7 +2299,7 @@ async function renderGoalArchive(c) {
         : sections)}`;
   }
 
-  buildPage();
+  await buildPage();
 }
 
 function setArchiveFilter(f) {

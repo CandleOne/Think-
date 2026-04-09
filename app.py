@@ -32,7 +32,7 @@ def load_local_env(env_path='.env'):
 
 load_local_env()
 
-from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info, query_ai, query_ai_empowered, analyze_goals
+from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info, query_ai, query_ai_empowered, analyze_goals, build_today_plan
 
 app = Flask(__name__, static_folder='static')
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lifeoptimization.db')
@@ -1273,6 +1273,62 @@ def ai_analyze_goals():
         'goals': enriched,
         'priority_list': result.get('priority_list', []),
         'summary': result.get('summary', ''),
+    })
+
+
+@app.route('/api/ai/today-plan', methods=['POST'])
+def ai_today_plan():
+    from datetime import datetime as _datetime
+
+    data = request.get_json(silent=True) or {}
+    now_iso = str(data.get('now_iso') or _datetime.utcnow().isoformat())
+    try:
+        end_hour = int(data.get('end_hour', 22) or 22)
+    except (TypeError, ValueError):
+        end_hour = 22
+    end_hour = max(18, min(24, end_hour))
+
+    db = get_db()
+    schedule_tasks = rows_to_list(db.execute('''
+        SELECT ci.id, ci.name, ci.task_time, ci.task_interval, ci.subgroup,
+               ss.label as section_label, ss.page_key as section_key, ss.is_schedule
+        FROM custom_items ci
+        JOIN sidebar_sections ss ON ci.section_key = ss.page_key
+        WHERE ss.is_schedule = 1 AND ci.is_task = 1
+        ORDER BY ci.task_time, ci.sort_order, ci.name
+    ''').fetchall())
+    db.close()
+
+    archive_response = get_goals_archive()
+    archive_items = archive_response.get_json(silent=True)
+    if not isinstance(archive_items, list):
+        archive_items = []
+
+    # Candidate pool: goals/tasks/objectives not completed and not already part of schedule rows.
+    candidates = []
+    for item in archive_items:
+        if not isinstance(item, dict):
+            continue
+        if int(item.get('is_completed') or 0):
+            continue
+        source_type = str(item.get('source_type') or '')
+        item_kind = str(item.get('item_kind') or '')
+        is_schedule_section = int(item.get('is_schedule_section') or 0)
+        if source_type == 'custom_item' and is_schedule_section == 1:
+            continue
+        if source_type in {'goal', 'task'} or item_kind in {'task', 'long_term_objective', 'goal_item', 'goal'}:
+            candidates.append(item)
+
+    plan = build_today_plan(schedule_tasks, candidates, now_iso=now_iso, end_hour=end_hour)
+
+    return jsonify({
+        'ok': True,
+        'mode': plan.get('mode', 'heuristic'),
+        'summary': plan.get('summary', ''),
+        'schedule': schedule_tasks,
+        'candidates_considered': len(candidates),
+        'free_minutes': int(plan.get('free_minutes') or 0),
+        'recommendations': plan.get('recommendations', []),
     })
 
 
