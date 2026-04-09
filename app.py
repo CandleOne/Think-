@@ -1344,6 +1344,145 @@ def ai_today_plan():
     })
 
 
+@app.route('/api/ai/today-plan/insert', methods=['POST'])
+def ai_today_plan_insert():
+    data, error = get_json_payload(required_fields=['today_section_key', 'selected_archive_ids'])
+    if error:
+        return error
+
+    today_section_key = str(data.get('today_section_key') or '').strip()
+    selected_archive_ids = data.get('selected_archive_ids') if isinstance(data.get('selected_archive_ids'), list) else []
+    selected_set = {str(x).strip() for x in selected_archive_ids if str(x).strip()}
+    recommendations = data.get('recommendations') if isinstance(data.get('recommendations'), list) else []
+
+    if not today_section_key:
+        return api_error('today_section_key is required', 400)
+    if not selected_set:
+        return api_error('selected_archive_ids must contain at least one item', 400)
+
+    db = get_db()
+    try:
+        section = db.execute(
+            'SELECT id, label, is_schedule FROM sidebar_sections WHERE page_key=?',
+            (today_section_key,)
+        ).fetchone()
+        if not section:
+            return api_error('Schedule section not found', 404)
+        if int(section['is_schedule'] or 0) != 1:
+            return api_error('Target section is not schedule-enabled', 400)
+
+        status_rows = rows_to_list(db.execute('SELECT id, color FROM statuses').fetchall())
+        status_by_color = {str(r['color']).lower(): int(r['id']) for r in status_rows}
+        default_status_id = status_by_color.get('blue') or (status_rows[0]['id'] if status_rows else 1)
+
+        existing_max = db.execute(
+            'SELECT MAX(sort_order) FROM custom_items WHERE section_key=?',
+            (today_section_key,)
+        ).fetchone()[0]
+        next_sort = int(existing_max or 0) + 1
+
+        rec_by_archive = {
+            str(r.get('archive_id') or ''): r
+            for r in recommendations
+            if isinstance(r, dict) and str(r.get('archive_id') or '').strip()
+        }
+
+        archive_response = get_goals_archive()
+        archive_items = archive_response.get_json(silent=True)
+        if not isinstance(archive_items, list):
+            archive_items = []
+        archive_by_id = {
+            str(item.get('archive_id') or ''): item
+            for item in archive_items
+            if isinstance(item, dict) and str(item.get('archive_id') or '').strip()
+        }
+
+        inserted = []
+        for archive_id in selected_set:
+            item = archive_by_id.get(archive_id)
+            if not item:
+                continue
+            rec = rec_by_archive.get(archive_id, {})
+            name = str(item.get('title') or '').strip()
+            if not name:
+                continue
+
+            task_time = rec.get('planned_start') or None
+            subgroup = None
+            parsed_minutes = parse_time(task_time) if task_time else None
+            if parsed_minutes is not None:
+                hour = parsed_minutes // 60
+                if hour < 12:
+                    subgroup = 'Morning'
+                elif hour < 14:
+                    subgroup = 'Midday'
+                elif hour < 17:
+                    subgroup = 'Afternoon'
+                else:
+                    subgroup = 'Evening'
+
+            notes_parts = []
+            if item.get('description'):
+                notes_parts.append(str(item.get('description')))
+            if rec.get('reason'):
+                notes_parts.append(f"AI plan: {rec.get('reason')}")
+            notes = '\n\n'.join(p for p in notes_parts if p).strip() or None
+
+            duplicate = db.execute(
+                '''
+                SELECT id FROM custom_items
+                WHERE section_key=? AND name=? AND COALESCE(task_time, '') = COALESCE(?, '')
+                LIMIT 1
+                ''',
+                (today_section_key, name, task_time)
+            ).fetchone()
+            if duplicate:
+                continue
+
+            db.execute(
+                '''
+                INSERT INTO custom_items (
+                    section_key, name, status_id, link, notes, sort_order, is_task,
+                    task_time, task_count, task_interval, subgroup, is_quick_objective,
+                    is_long_term_objective, is_goal, objective_completed
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+                ''',
+                (
+                    today_section_key,
+                    name,
+                    default_status_id,
+                    item.get('link'),
+                    notes,
+                    next_sort,
+                    1,
+                    task_time,
+                    None,
+                    'daily',
+                    subgroup,
+                    0,
+                    0,
+                    1,
+                )
+            )
+            next_sort += 1
+            inserted.append({
+                'archive_id': archive_id,
+                'name': name,
+                'task_time': task_time,
+            })
+
+        db.commit()
+    finally:
+        db.close()
+
+    return jsonify({
+        'ok': True,
+        'inserted_count': len(inserted),
+        'inserted': inserted,
+        'today_section_key': today_section_key,
+    })
+
+
 @app.route('/api/sidebar', methods=['POST'])
 def add_sidebar_section():
     data, error = get_json_payload(required_fields=['label', 'group_name'])
