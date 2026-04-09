@@ -85,6 +85,34 @@ def ensure_schema_compatibility():
                 (max_order + 1,),
             )
 
+        tasks_section = conn.execute(
+            "SELECT id FROM sidebar_sections WHERE page_key='tasks'"
+        ).fetchone()
+        if not tasks_section:
+            max_order = conn.execute('SELECT MAX(sort_order) FROM sidebar_sections').fetchone()[0] or 0
+            conn.execute(
+                """
+                INSERT INTO sidebar_sections (
+                    group_name, label, page_key, sort_order, is_builtin, is_schedule, is_long_term_section
+                ) VALUES ('Life Areas', 'Tasks', 'tasks', ?, 1, 0, 0)
+                """,
+                (max_order + 1,),
+            )
+
+        misc_section = conn.execute(
+            "SELECT id FROM sidebar_sections WHERE page_key='misc'"
+        ).fetchone()
+        if not misc_section:
+            max_order = conn.execute('SELECT MAX(sort_order) FROM sidebar_sections').fetchone()[0] or 0
+            conn.execute(
+                """
+                INSERT INTO sidebar_sections (
+                    group_name, label, page_key, sort_order, is_builtin, is_schedule, is_long_term_section
+                ) VALUES ('Overview', 'Misc Items', 'misc', ?, 1, 0, 0)
+                """,
+                (max_order + 1,),
+            )
+
         # For existing Financial Theory data, default non-header rows to long-term objectives.
         conn.execute('''
             UPDATE custom_items
@@ -107,14 +135,18 @@ def ensure_schema_compatibility():
         ''')
 
         goal_columns = {row[1] for row in conn.execute("PRAGMA table_info(goals)").fetchall()}
-        for col, coltype in [
+        _GOAL_MIGRATIONS = [
             ('difficulty', 'INTEGER'),
             ('time_commitment_hours', 'REAL'),
             ('price_estimate', 'REAL'),
             ('ai_priority_score', 'INTEGER'),
             ('ai_reasoning', 'TEXT'),
-        ]:
+        ]
+        _VALID_COLTYPES = {'INTEGER', 'REAL', 'TEXT', 'BLOB'}
+        for col, coltype in _GOAL_MIGRATIONS:
             if col not in goal_columns:
+                # col/coltype are from the hardcoded list above; validate as extra safety.
+                assert coltype in _VALID_COLTYPES and col.isidentifier()
                 conn.execute(f'ALTER TABLE goals ADD COLUMN {col} {coltype}')
 
         conn.commit()
@@ -253,6 +285,65 @@ def normalize_goal_payload(data):
         'target_date': data.get('target_date'),
         'priority': priority,
         'is_completed': is_completed
+    }, None
+
+
+def normalize_task_payload(data):
+    try:
+        life_area_id = int(data['life_area_id'])
+        is_completed = int(data.get('is_completed', 0) or 0)
+    except (TypeError, ValueError):
+        return None, api_error('life_area_id and is_completed must be integers', 400)
+
+    goal_id = data.get('goal_id')
+    if goal_id in ('', None):
+        goal_id = None
+    else:
+        try:
+            goal_id = int(goal_id)
+        except (TypeError, ValueError):
+            return None, api_error('goal_id must be an integer when provided', 400)
+
+    title = str(data.get('title', '')).strip()
+    if not title:
+        return None, api_error('title is required', 400)
+
+    return {
+        'goal_id': goal_id,
+        'life_area_id': life_area_id,
+        'title': title,
+        'description': data.get('description'),
+        'is_completed': is_completed,
+        'due_date': data.get('due_date'),
+    }, None
+
+
+def normalize_misc_payload(data):
+    try:
+        status_id = int(data['status_id'])
+    except (TypeError, ValueError):
+        return None, api_error('status_id must be an integer', 400)
+
+    life_area_id = data.get('life_area_id')
+    if life_area_id in ('', None):
+        life_area_id = None
+    else:
+        try:
+            life_area_id = int(life_area_id)
+        except (TypeError, ValueError):
+            return None, api_error('life_area_id must be an integer when provided', 400)
+
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return None, api_error('name is required', 400)
+
+    return {
+        'life_area_id': life_area_id,
+        'name': name,
+        'status_id': status_id,
+        'category': data.get('category'),
+        'link': data.get('link'),
+        'notes': data.get('notes'),
     }, None
 
 
@@ -710,6 +801,171 @@ def delete_goal(goal_id):
     return jsonify({'ok': True})
 
 
+# ── Tasks ─────────────────────────────────────────────────
+
+@app.route('/api/tasks', methods=['GET'])
+def get_tasks():
+    db = get_db()
+    rows = db.execute('''
+        SELECT t.*, la.name as area_name, g.title as goal_title
+        FROM tasks t
+        JOIN life_areas la ON t.life_area_id = la.id
+        LEFT JOIN goals g ON t.goal_id = g.id
+        ORDER BY t.is_completed, t.due_date, t.title
+    ''').fetchall()
+    db.close()
+    return jsonify(rows_to_list(rows))
+
+
+@app.route('/api/tasks', methods=['POST'])
+def add_task():
+    data, error = get_json_payload(required_fields=['life_area_id', 'title'])
+    if error:
+        return error
+    normalized, validation_error = normalize_task_payload(data)
+    if validation_error:
+        return validation_error
+
+    db = get_db()
+    try:
+        db.execute(
+            'INSERT INTO tasks (goal_id, life_area_id, title, description, is_completed, due_date) VALUES (?,?,?,?,?,?)',
+            (normalized['goal_id'], normalized['life_area_id'], normalized['title'],
+             normalized['description'], normalized['is_completed'], normalized['due_date']))
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
+    return jsonify({'ok': True}), 201
+
+
+@app.route('/api/tasks/<int:task_id>', methods=['PUT'])
+def update_task(task_id):
+    data, error = get_json_payload(required_fields=['life_area_id', 'title'])
+    if error:
+        return error
+    normalized, validation_error = normalize_task_payload(data)
+    if validation_error:
+        return validation_error
+
+    db = get_db()
+    try:
+        cur = db.execute('''UPDATE tasks 
+                            SET goal_id=?, life_area_id=?, title=?, description=?, is_completed=?, due_date=?, updated_at=datetime('now')
+                            WHERE id=?''',
+                         (normalized['goal_id'], normalized['life_area_id'], normalized['title'],
+                          normalized['description'], normalized['is_completed'],
+                          normalized['due_date'], task_id))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Task not found', 404)
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/tasks/<int:task_id>', methods=['DELETE'])
+def delete_task(task_id):
+    db = get_db()
+    try:
+        cur = db.execute('DELETE FROM tasks WHERE id=?', (task_id,))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Task not found', 404)
+        db.commit()
+    finally:
+        db.close()
+    return jsonify({'ok': True})
+
+
+# ── Misc Items ────────────────────────────────────────────
+
+@app.route('/api/misc', methods=['GET'])
+def get_misc_items():
+    db = get_db()
+    rows = db.execute('''
+        SELECT m.*, s.color as status_color, s.name as status_name, la.name as area_name
+        FROM misc_items m
+        JOIN statuses s ON m.status_id = s.id
+        LEFT JOIN life_areas la ON m.life_area_id = la.id
+        ORDER BY m.category, m.name
+    ''').fetchall()
+    db.close()
+    return jsonify(rows_to_list(rows))
+
+
+@app.route('/api/misc', methods=['POST'])
+def add_misc_item():
+    data, error = get_json_payload(required_fields=['name', 'status_id'])
+    if error:
+        return error
+    normalized, validation_error = normalize_misc_payload(data)
+    if validation_error:
+        return validation_error
+
+    db = get_db()
+    try:
+        db.execute(
+            'INSERT INTO misc_items (life_area_id, name, status_id, category, link, notes) VALUES (?,?,?,?,?,?)',
+            (normalized['life_area_id'], normalized['name'], normalized['status_id'],
+             normalized['category'], normalized['link'], normalized['notes']))
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
+    return jsonify({'ok': True}), 201
+
+
+@app.route('/api/misc/<int:item_id>', methods=['PUT'])
+def update_misc_item(item_id):
+    data, error = get_json_payload(required_fields=['name', 'status_id'])
+    if error:
+        return error
+    normalized, validation_error = normalize_misc_payload(data)
+    if validation_error:
+        return validation_error
+
+    db = get_db()
+    try:
+        cur = db.execute('''UPDATE misc_items 
+                            SET life_area_id=?, name=?, status_id=?, category=?, link=?, notes=?, updated_at=datetime('now')
+                            WHERE id=?''',
+                         (normalized['life_area_id'], normalized['name'], normalized['status_id'],
+                          normalized['category'], normalized['link'], normalized['notes'], item_id))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Misc item not found', 404)
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/misc/<int:item_id>', methods=['DELETE'])
+def delete_misc_item(item_id):
+    db = get_db()
+    try:
+        cur = db.execute('DELETE FROM misc_items WHERE id=?', (item_id,))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Misc item not found', 404)
+        db.commit()
+    finally:
+        db.close()
+    return jsonify({'ok': True})
+
+
 @app.route('/api/goals/archive', methods=['GET'])
 def get_goals_archive():
     """Return all goal-like items (goals, tasks, long-term objectives) with term buckets."""
@@ -877,7 +1133,7 @@ def get_sidebar():
 
 
 BUILTIN_PAGES = {
-    'dashboard', 'purchases', 'fashion', 'skincare', 'pharmacology', 'goals', 'goal_archive', 'schedule', 'ai_interface'
+    'dashboard', 'purchases', 'fashion', 'skincare', 'pharmacology', 'goals', 'tasks', 'misc', 'goal_archive', 'schedule', 'ai_interface'
 }
 
 
@@ -1530,14 +1786,15 @@ def add_sidebar_section():
 @app.route('/api/sidebar/<int:section_id>/toggle-schedule', methods=['PUT'])
 def toggle_sidebar_schedule(section_id):
     db = get_db()
-    section = db.execute('SELECT is_schedule FROM sidebar_sections WHERE id=?', (section_id,)).fetchone()
-    if not section:
+    try:
+        section = db.execute('SELECT is_schedule FROM sidebar_sections WHERE id=?', (section_id,)).fetchone()
+        if not section:
+            return jsonify({'error': 'Not found'}), 404
+        new_val = 0 if section['is_schedule'] else 1
+        db.execute('UPDATE sidebar_sections SET is_schedule=? WHERE id=?', (new_val, section_id))
+        db.commit()
+    finally:
         db.close()
-        return jsonify({'error': 'Not found'}), 404
-    new_val = 0 if section['is_schedule'] else 1
-    db.execute('UPDATE sidebar_sections SET is_schedule=? WHERE id=?', (new_val, section_id))
-    db.commit()
-    db.close()
     return jsonify({'ok': True, 'is_schedule': new_val})
 
 
@@ -1555,32 +1812,33 @@ def reorder_sidebar():
         return api_error('order entries must be integers', 400)
 
     db = get_db()
-    existing_ids = {row['id'] for row in db.execute('SELECT id FROM sidebar_sections').fetchall()}
-    if any(section_id not in existing_ids for section_id in order):
+    try:
+        existing_ids = {row['id'] for row in db.execute('SELECT id FROM sidebar_sections').fetchall()}
+        if any(section_id not in existing_ids for section_id in order):
+            return api_error('order contains unknown section id', 404)
+        for i, section_id in enumerate(order):
+            db.execute('UPDATE sidebar_sections SET sort_order=? WHERE id=?', (i, section_id))
+        db.commit()
+    finally:
         db.close()
-        return api_error('order contains unknown section id', 404)
-    for i, section_id in enumerate(order):
-        db.execute('UPDATE sidebar_sections SET sort_order=? WHERE id=?', (i, section_id))
-    db.commit()
-    db.close()
     return jsonify({'ok': True})
 
 
 @app.route('/api/sidebar/<int:section_id>', methods=['DELETE'])
 def delete_sidebar_section(section_id):
     db = get_db()
-    section = db.execute('SELECT * FROM sidebar_sections WHERE id=?', (section_id,)).fetchone()
-    if not section:
+    try:
+        section = db.execute('SELECT * FROM sidebar_sections WHERE id=?', (section_id,)).fetchone()
+        if not section:
+            return jsonify({'error': 'Not found'}), 404
+        if section['page_key'] == 'dashboard':
+            return jsonify({'error': 'Cannot delete the Dashboard'}), 403
+        if not section['is_builtin']:
+            db.execute('DELETE FROM custom_items WHERE section_key=?', (section['page_key'],))
+        db.execute('DELETE FROM sidebar_sections WHERE id=?', (section_id,))
+        db.commit()
+    finally:
         db.close()
-        return jsonify({'error': 'Not found'}), 404
-    if section['page_key'] == 'dashboard':
-        db.close()
-        return jsonify({'error': 'Cannot delete the Dashboard'}), 403
-    if not section['is_builtin']:
-        db.execute('DELETE FROM custom_items WHERE section_key=?', (section['page_key'],))
-    db.execute('DELETE FROM sidebar_sections WHERE id=?', (section_id,))
-    db.commit()
-    db.close()
     return jsonify({'ok': True})
 
 
@@ -1671,16 +1929,17 @@ def reorder_custom_items(section_key):
         return api_error('order entries must be integers', 400)
 
     db = get_db()
-    existing_ids = {
-        row['id'] for row in db.execute('SELECT id FROM custom_items WHERE section_key=?', (section_key,)).fetchall()
-    }
-    if any(item_id not in existing_ids for item_id in order):
+    try:
+        existing_ids = {
+            row['id'] for row in db.execute('SELECT id FROM custom_items WHERE section_key=?', (section_key,)).fetchall()
+        }
+        if any(item_id not in existing_ids for item_id in order):
+            return api_error('order contains unknown item id', 404)
+        for i, item_id in enumerate(order):
+            db.execute('UPDATE custom_items SET sort_order=? WHERE id=? AND section_key=?', (i, item_id, section_key))
+        db.commit()
+    finally:
         db.close()
-        return api_error('order contains unknown item id', 404)
-    for i, item_id in enumerate(order):
-        db.execute('UPDATE custom_items SET sort_order=? WHERE id=? AND section_key=?', (i, item_id, section_key))
-    db.commit()
-    db.close()
     return jsonify({'ok': True})
 
 

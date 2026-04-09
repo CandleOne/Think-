@@ -111,3 +111,18 @@ INSERT INTO skincare_products (routine_id, name, status_id, step_order, is_wante
     (NULL,
      'Black Girl Sunscreen',
      (SELECT id FROM statuses WHERE color='blue'), 0, 1);
+
+-- ============================================================
+-- SIDEBAR SECTIONS
+-- ============================================================
+INSERT INTO sidebar_sections (group_name, label, page_key, sort_order, is_builtin, is_schedule, is_long_term_section) VALUES
+    ('Overview', 'Dashboard', 'dashboard', 1, 1, 0, 0),
+    ('Overview', 'All Purchases', 'purchases', 2, 1, 0, 0),
+    ('Overview', 'Misc Items', 'misc', 3, 1, 0, 0),
+    ('Appearance', 'Fashion', 'fashion', 10, 1, 0, 0),
+    ('Appearance', 'Skincare', 'skincare', 11, 1, 0, 0),
+    ('Appearance', 'Pharmacology', 'pharmacology', 12, 1, 0, 0),
+    ('Life Areas', 'Goals', 'goals', 20, 1, 0, 0),
+    ('Life Areas', 'Tasks', 'tasks', 21, 1, 0, 0),
+    ('Goals', 'Goal Archive', 'goal_archive', 22, 1, 0, 0),
+    ('AI', 'AI Interface', 'ai_interface', 30, 1, 0, 0);

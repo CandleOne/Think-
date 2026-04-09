@@ -13,6 +13,7 @@ Commands:
     add-skincare <routine> <name> <status> <order> [link]
     add-goal <area> <title> [description]
     update-status <table> <id> <new_status_color>
+    delete <table> <id>     Delete an item from a table
     tables                  List all tables
 """
 import sqlite3
@@ -31,21 +32,24 @@ def get_conn():
 
 def show_table(table_name):
     conn = get_conn()
-    safe_tables = [r['name'] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' OR type='view'").fetchall()]
-    if table_name not in safe_tables:
-        print(f"Unknown table: {table_name}. Available: {safe_tables}")
-        return
-    rows = conn.execute(f'SELECT * FROM [{table_name}]').fetchall()
-    if not rows:
-        print(f"(empty)")
-        return
-    cols = rows[0].keys()
-    print(' | '.join(cols))
-    print('-' * 80)
-    for r in rows:
-        print(' | '.join(str(r[c]) for c in cols))
-    conn.close()
+    try:
+        safe_tables = [r['name'] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' OR type='view'").fetchall()]
+        if table_name not in safe_tables:
+            print(f"Unknown table: {table_name}. Available: {safe_tables}")
+            return
+        # table_name is validated against actual DB objects above, safe to interpolate
+        rows = conn.execute(f'SELECT * FROM [{table_name}]').fetchall()
+        if not rows:
+            print(f"(empty)")
+            return
+        cols = rows[0].keys()
+        print(' | '.join(cols))
+        print('-' * 80)
+        for r in rows:
+            print(' | '.join(str(r[c]) for c in cols))
+    finally:
+        conn.close()
 
 
 def show_routines():
@@ -146,19 +150,41 @@ def add_goal(area_name, title, description=None):
 
 def update_status(table_name, item_id, new_color):
     conn = get_conn()
-    safe_tables = ['fashion_items', 'skincare_products', 'pharmacology_items', 'misc_items']
-    if table_name not in safe_tables:
-        print(f"Can only update status on: {safe_tables}")
-        return
-    status = conn.execute('SELECT id FROM statuses WHERE color = ?', (new_color,)).fetchone()
-    if not status:
-        print(f"Unknown status color: {new_color}")
-        return
-    conn.execute(f'UPDATE [{table_name}] SET status_id = ?, updated_at = datetime("now") WHERE id = ?',
-                 (status['id'], int(item_id)))
-    conn.commit()
-    print(f"Updated {table_name} item {item_id} to status: {new_color}")
-    conn.close()
+    try:
+        safe_tables = ['fashion_items', 'skincare_products', 'pharmacology_items', 'misc_items']
+        if table_name not in safe_tables:
+            print(f"Can only update status on: {safe_tables}")
+            return
+        status = conn.execute('SELECT id FROM statuses WHERE color = ?', (new_color,)).fetchone()
+        if not status:
+            print(f"Unknown status color: {new_color}")
+            return
+        conn.execute(f'UPDATE [{table_name}] SET status_id = ?, updated_at = datetime("now") WHERE id = ?',
+                     (status['id'], int(item_id)))
+        conn.commit()
+        print(f"Updated {table_name} item {item_id} to status: {new_color}")
+    finally:
+        conn.close()
+
+
+def delete_item(table_name, item_id):
+    """Delete an item from a whitelisted table by ID."""
+    conn = get_conn()
+    try:
+        safe_tables = ['fashion_items', 'skincare_products', 'pharmacology_items',
+                       'misc_items', 'goals', 'tasks', 'custom_items']
+        if table_name not in safe_tables:
+            print(f"Can only delete from: {safe_tables}")
+            return
+        row = conn.execute(f'SELECT id FROM [{table_name}] WHERE id = ?', (int(item_id),)).fetchone()
+        if not row:
+            print(f"No item with id={item_id} in {table_name}")
+            return
+        conn.execute(f'DELETE FROM [{table_name}] WHERE id = ?', (int(item_id),))
+        conn.commit()
+        print(f"Deleted {table_name} item {item_id}")
+    finally:
+        conn.close()
 
 
 def list_tables():
@@ -194,6 +220,8 @@ if __name__ == '__main__':
                  sys.argv[4] if len(sys.argv) > 4 else None)
     elif cmd == 'update-status' and len(sys.argv) >= 5:
         update_status(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif cmd == 'delete' and len(sys.argv) >= 4:
+        delete_item(sys.argv[2], sys.argv[3])
     elif cmd == 'tables':
         list_tables()
     else:

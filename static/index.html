@@ -762,6 +762,8 @@ async function loadPage(page) {
     case 'skincare': return renderSkincare(c);
     case 'pharmacology': return renderPharmacology(c);
     case 'goals': return renderGoals(c);
+    case 'tasks': return renderTasks(c);
+    case 'misc': return renderMiscItems(c);
     case 'goal_archive': return renderGoalArchive(c);
     case 'schedule': return renderSchedule(c);
     case 'ai_interface': return renderAiInterface(c);
@@ -2069,6 +2071,209 @@ async function deleteGoal(id) {
   if (showApiError(res)) return;
   toast('Goal deleted');
   loadPage('goals');
+}
+
+// ── Tasks ──
+
+async function renderTasks(c) {
+  const tasks = await getList('tasks', 'Failed to load tasks');
+  const grouped = {};
+  lifeAreas.forEach(a => grouped[a.name] = []);
+  tasks.forEach(t => {
+    if (!grouped[t.area_name]) grouped[t.area_name] = [];
+    grouped[t.area_name].push(t);
+  });
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>Tasks</h2>
+      <button class="btn btn-primary" onclick="openTaskModal()">+ Add Task</button>
+    </div>
+    ${Object.entries(grouped).map(([area, items]) => `
+      <div class="card">
+        <h3>${esc(area)}</h3>
+        <ul class="item-list">
+          ${items.map(t => `
+            <li class="goal-row">
+              <div class="goal-checkbox ${t.is_completed ? 'checked' : ''}" onclick="toggleTask(${t.id}, ${t.is_completed ? 0 : 1})"></div>
+              <div style="flex:1">
+                <div class="goal-title ${t.is_completed ? 'completed' : ''}">${esc(t.title)}</div>
+                ${t.description ? `<div class="goal-meta">${esc(t.description)}</div>` : ''}
+                ${t.goal_title ? `<div class="goal-meta">Goal: ${esc(t.goal_title)}</div>` : ''}
+              </div>
+              ${t.due_date ? `<span class="goal-meta">${esc(t.due_date)}</span>` : ''}
+              <div class="item-actions">
+                <button class="btn-icon" onclick="openTaskModal(${t.id})">✎</button>
+                <button class="btn-icon btn-danger" onclick="deleteTask(${t.id})">✕</button>
+              </div>
+            </li>
+          `).join('')}
+          ${items.length === 0 ? '<li class="goal-row" style="color:var(--text-muted)">No tasks yet</li>' : ''}
+        </ul>
+      </div>
+    `).join('')}`;
+}
+
+async function openTaskModal(editId) {
+  const goals = await getList('goals', 'Failed to load goals', { toastOnError: false });
+  let item = { life_area_id: lifeAreas[0]?.id, goal_id: '', title: '', description: '', due_date: '' };
+  if (editId) {
+    const tasks = await getList('tasks', 'Failed to load tasks', { toastOnError: false });
+    item = tasks.find(t => t.id === editId) || item;
+  }
+  openModal(`
+    <h3>${editId ? 'Edit' : 'Add'} Task</h3>
+    <form id="task-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Life Area</label>
+          <select name="life_area_id">${lifeAreas.map(a =>
+            `<option value="${a.id}" ${a.id === item.life_area_id ? 'selected' : ''}>${a.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Goal (optional)</label>
+          <select name="goal_id">
+            <option value="">— None —</option>
+            ${goals.map(g => `<option value="${g.id}" ${g.id === item.goal_id ? 'selected' : ''}>${esc(g.title)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Title</label><input name="title" value="${esc(item.title || '')}" required></div>
+      <div class="form-group"><label>Description</label><textarea name="description">${esc(item.description || '')}</textarea></div>
+      <div class="form-group"><label>Due Date</label><input type="date" name="due_date" value="${esc(item.due_date || '')}"></div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTask(${editId || 'null'})">Save</button>
+    </div>`);
+}
+
+async function saveTask(id) {
+  const data = getFormData('task-form');
+  data.life_area_id = Number(data.life_area_id);
+  data.goal_id = data.goal_id ? Number(data.goal_id) : null;
+  let res;
+  if (id) res = await api(`tasks/${id}`, { method: 'PUT', body: data });
+  else res = await api('tasks', { method: 'POST', body: data });
+  if (showApiError(res)) return;
+  closeModal();
+  toast(id ? 'Task updated' : 'Task added');
+  loadPage('tasks');
+}
+
+async function toggleTask(id, completed) {
+  const tasks = await getList('tasks', 'Failed to load tasks', { toastOnError: false });
+  const task = tasks.find(t => t.id === id);
+  if (!task) return;
+  task.is_completed = completed;
+  const res = await api(`tasks/${id}`, { method: 'PUT', body: task });
+  if (showApiError(res)) return;
+  loadPage('tasks');
+}
+
+async function deleteTask(id) {
+  if (!confirm('Delete this task?')) return;
+  const res = await api(`tasks/${id}`, { method: 'DELETE' });
+  if (showApiError(res)) return;
+  toast('Task deleted');
+  loadPage('tasks');
+}
+
+// ── Misc Items ──
+
+async function renderMiscItems(c) {
+  const items = await getList('misc', 'Failed to load misc items');
+  const grouped = {};
+  items.forEach(m => {
+    const cat = m.category || 'Uncategorized';
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(m);
+  });
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>Miscellaneous Items</h2>
+      <button class="btn btn-primary" onclick="openMiscModal()">+ Add Item</button>
+    </div>
+    ${Object.entries(grouped).map(([cat, items]) => `
+      <div class="card">
+        <h3>${esc(cat)}</h3>
+        <ul class="item-list">
+          ${items.map(m => `
+            <li class="goal-row">
+              <span class="status-dot" style="background:var(--${m.status_color || 'blue'})"></span>
+              <div style="flex:1">
+                <span>${esc(m.name)}</span>
+                ${m.area_name ? `<span class="goal-meta"> · ${esc(m.area_name)}</span>` : ''}
+                ${m.notes ? `<div class="goal-meta">${esc(m.notes)}</div>` : ''}
+              </div>
+              ${m.link ? `<a href="${esc(m.link)}" target="_blank" class="btn-icon">🔗</a>` : ''}
+              <div class="item-actions">
+                <button class="btn-icon" onclick="openMiscModal(${m.id})">✎</button>
+                <button class="btn-icon btn-danger" onclick="deleteMiscItem(${m.id})">✕</button>
+              </div>
+            </li>
+          `).join('')}
+        </ul>
+      </div>
+    `).join('')}`;
+}
+
+async function openMiscModal(editId) {
+  let item = { life_area_id: '', name: '', status_id: statuses[0]?.id, category: '', link: '', notes: '' };
+  if (editId) {
+    const items = await getList('misc', 'Failed to load misc items', { toastOnError: false });
+    item = items.find(m => m.id === editId) || item;
+  }
+  openModal(`
+    <h3>${editId ? 'Edit' : 'Add'} Misc Item</h3>
+    <form id="misc-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Life Area (optional)</label>
+          <select name="life_area_id">
+            <option value="">— None —</option>
+            ${lifeAreas.map(a => `<option value="${a.id}" ${a.id === item.life_area_id ? 'selected' : ''}>${a.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select name="status_id">${statuses.map(s =>
+            `<option value="${s.id}" ${s.id === item.status_id ? 'selected' : ''}>${s.name} (${s.color})</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Name</label><input name="name" value="${esc(item.name || '')}" required></div>
+      <div class="form-group"><label>Category</label><input name="category" value="${esc(item.category || '')}"></div>
+      <div class="form-group"><label>Link</label><input name="link" value="${esc(item.link || '')}"></div>
+      <div class="form-group"><label>Notes</label><textarea name="notes">${esc(item.notes || '')}</textarea></div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMiscItem(${editId || 'null'})">Save</button>
+    </div>`);
+}
+
+async function saveMiscItem(id) {
+  const data = getFormData('misc-form');
+  data.status_id = Number(data.status_id);
+  data.life_area_id = data.life_area_id ? Number(data.life_area_id) : null;
+  let res;
+  if (id) res = await api(`misc/${id}`, { method: 'PUT', body: data });
+  else res = await api('misc', { method: 'POST', body: data });
+  if (showApiError(res)) return;
+  closeModal();
+  toast(id ? 'Item updated' : 'Item added');
+  loadPage('misc');
+}
+
+async function deleteMiscItem(id) {
+  if (!confirm('Delete this item?')) return;
+  const res = await api(`misc/${id}`, { method: 'DELETE' });
+  if (showApiError(res)) return;
+  toast('Item deleted');
+  loadPage('misc');
 }
 
 // ── Utils ──
