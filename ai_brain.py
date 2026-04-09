@@ -1,8 +1,9 @@
 """AI planning helpers for schedule optimization and routine generation.
 
-This module supports two modes:
-1) LLM mode when OPENAI_API_KEY is configured.
-2) Deterministic fallback heuristics when no key is available.
+This module supports three modes:
+1) Claude mode when ANTHROPIC_API_KEY/CLAUDE_API_KEY is configured.
+2) OpenAI mode when OPENAI_API_KEY is configured.
+3) Deterministic fallback heuristics when no provider key is available.
 """
 
 from __future__ import annotations
@@ -21,6 +22,40 @@ class PlanResult:
     mode: str
     summary: str
     updates: list[dict[str, Any]]
+
+
+def _get_provider_env() -> tuple[str, str, bool]:
+    """Resolve active AI provider from env with safe fallback ordering."""
+    requested = (os.environ.get("AI_BRAIN_PROVIDER") or "").strip().lower()
+    has_claude = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY"))
+    has_openai = bool(os.environ.get("OPENAI_API_KEY"))
+
+    if requested in {"claude", "anthropic"}:
+        model = os.environ.get("CLAUDE_MODEL") or os.environ.get("AI_BRAIN_MODEL") or "claude-3-7-sonnet-latest"
+        return "claude", model, has_claude
+    if requested == "openai":
+        model = os.environ.get("OPENAI_MODEL") or os.environ.get("AI_BRAIN_MODEL") or "gpt-4o-mini"
+        return "openai", model, has_openai
+    if requested == "heuristic":
+        return "heuristic", "heuristic", True
+
+    # Auto mode: prefer Claude when present, then OpenAI, otherwise fallback.
+    if has_claude:
+        model = os.environ.get("CLAUDE_MODEL") or os.environ.get("AI_BRAIN_MODEL") or "claude-3-7-sonnet-latest"
+        return "claude", model, True
+    if has_openai:
+        model = os.environ.get("OPENAI_MODEL") or os.environ.get("AI_BRAIN_MODEL") or "gpt-4o-mini"
+        return "openai", model, True
+    return "heuristic", "heuristic", False
+
+
+def get_ai_runtime_info() -> dict[str, Any]:
+    provider, model, configured = _get_provider_env()
+    return {
+        "provider": provider,
+        "model": model,
+        "configured": configured,
+    }
 
 
 def _parse_time_to_minutes(value: str | None) -> int | None:
@@ -153,9 +188,71 @@ def _call_openai_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | 
         return None
 
 
+def _call_claude_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY")
+    if not api_key:
+        return None
+
+    base_url = os.environ.get("CLAUDE_BASE_URL", "https://api.anthropic.com/v1").rstrip("/")
+    model = os.environ.get("CLAUDE_MODEL") or os.environ.get("AI_BRAIN_MODEL") or "claude-3-7-sonnet-latest"
+
+    payload = {
+        "model": model,
+        "max_tokens": 1800,
+        "temperature": 0.2,
+        "system": system_prompt + " Return valid JSON only.",
+        "messages": [
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib_request.Request(
+        f"{base_url}/messages",
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": os.environ.get("ANTHROPIC_VERSION", "2023-06-01"),
+        },
+    )
+
+    try:
+        with urllib_request.urlopen(req, timeout=45) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            content = body.get("content") or []
+            text_parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            raw = "\n".join(text_parts).strip()
+            if not raw:
+                return None
+            return json.loads(raw)
+    except Exception:
+        return None
+
+
+def _call_ai_json(system_prompt: str, user_prompt: str) -> tuple[str, dict[str, Any] | None]:
+    provider, _, configured = _get_provider_env()
+    if provider == "claude" and configured:
+        return "claude", _call_claude_json(system_prompt, user_prompt)
+    if provider == "openai" and configured:
+        return "openai", _call_openai_json(system_prompt, user_prompt)
+
+    # Auto fallback attempt when provider is not explicitly configured.
+    claude = _call_claude_json(system_prompt, user_prompt)
+    if claude:
+        return "claude", claude
+    openai = _call_openai_json(system_prompt, user_prompt)
+    if openai:
+        return "openai", openai
+    return "heuristic", None
+
+
 def optimize_schedule(tasks: list[dict[str, Any]], preferences: dict[str, Any] | None = None) -> PlanResult:
     preferences = preferences or {}
-    llm_result = _call_openai_json(
+    provider, llm_result = _call_ai_json(
         system_prompt=(
             "You optimize personal schedules. Return JSON with keys: summary (string), updates (array). "
             "Each update object must include id, section_key, task_time (H:MM AM/PM), subgroup, sort_order, reason."
@@ -192,7 +289,7 @@ def optimize_schedule(tasks: list[dict[str, Any]], preferences: dict[str, Any] |
             )
         if clean:
             return PlanResult(
-                mode="llm",
+                mode=provider,
                 summary=str(llm_result.get("summary", f"Generated {len(clean)} AI schedule updates.")),
                 updates=clean,
             )
@@ -206,7 +303,7 @@ def build_routine_plan(payload: dict[str, Any], existing_sections: list[dict[str
     cadence = str(payload.get("cadence") or "daily").strip().lower()
     minutes = int(payload.get("available_minutes") or 90)
 
-    llm_result = _call_openai_json(
+    provider, llm_result = _call_ai_json(
         system_prompt=(
             "You design actionable routines. Return JSON with keys: section_label, group_name, section_type, summary, items. "
             "items is an array of objects with name, task_time, task_interval, subgroup, notes, status_color."
@@ -227,7 +324,7 @@ def build_routine_plan(payload: dict[str, Any], existing_sections: list[dict[str
 
     if llm_result and isinstance(llm_result.get("items"), list) and llm_result["items"]:
         plan = {
-            "mode": "llm",
+            "mode": provider,
             "section_label": str(llm_result.get("section_label") or title),
             "group_name": str(llm_result.get("group_name") or "Routines"),
             "section_type": str(llm_result.get("section_type") or "schedule"),

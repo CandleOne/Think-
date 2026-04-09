@@ -5,7 +5,7 @@ Flask backend serving API + frontend for managing the life optimization database
 import sqlite3
 import os
 from flask import Flask, request, jsonify, send_from_directory
-from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates
+from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info
 
 app = Flask(__name__, static_folder='static')
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lifeoptimization.db')
@@ -697,11 +697,12 @@ def get_schedule():
 
 @app.route('/api/ai/status')
 def ai_status():
+    runtime = get_ai_runtime_info()
     return jsonify({
         'ok': True,
-        'provider': 'openai' if os.environ.get('OPENAI_API_KEY') else 'heuristic',
-        'model': os.environ.get('AI_BRAIN_MODEL', 'gpt-4o-mini'),
-        'configured': bool(os.environ.get('OPENAI_API_KEY'))
+        'provider': runtime['provider'],
+        'model': runtime['model'],
+        'configured': runtime['configured']
     })
 
 
