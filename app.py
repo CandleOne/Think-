@@ -69,6 +69,20 @@ def ensure_schema_compatibility():
                 (max_order + 1,),
             )
 
+        archive_section = conn.execute(
+            "SELECT id FROM sidebar_sections WHERE page_key='goal_archive'"
+        ).fetchone()
+        if not archive_section:
+            max_order = conn.execute('SELECT MAX(sort_order) FROM sidebar_sections').fetchone()[0] or 0
+            conn.execute(
+                """
+                INSERT INTO sidebar_sections (
+                    group_name, label, page_key, sort_order, is_builtin, is_schedule, is_long_term_section
+                ) VALUES ('Goals', 'Goal Archive', 'goal_archive', ?, 1, 0, 0)
+                """,
+                (max_order + 1,),
+            )
+
         # For existing Financial Theory data, default non-header rows to long-term objectives.
         conn.execute('''
             UPDATE custom_items
@@ -686,6 +700,49 @@ def delete_goal(goal_id):
     return jsonify({'ok': True})
 
 
+@app.route('/api/goals/archive', methods=['GET'])
+def get_goals_archive():
+    """Return all goals (active + completed) annotated with term bucket."""
+    from datetime import date as _date
+    today = _date.today()
+    db = get_db()
+    rows = rows_to_list(db.execute('''
+        SELECT g.*, la.name as area_name
+        FROM goals g
+        JOIN life_areas la ON g.life_area_id = la.id
+        ORDER BY la.sort_order, g.priority DESC, g.title
+    ''').fetchall())
+    db.close()
+
+    def term_bucket(row):
+        td = (row.get('target_date') or '').strip()
+        if td:
+            try:
+                t = _date.fromisoformat(td)
+                days = (t - today).days
+                if days < 0:
+                    return 'overdue'
+                if days <= 90:
+                    return 'short'
+                if days <= 365:
+                    return 'medium'
+                return 'long'
+            except ValueError:
+                pass
+        # No date — fall back on priority
+        p = int(row.get('priority') or 0)
+        if p >= 2:
+            return 'short'
+        if p == 1:
+            return 'medium'
+        return 'long'
+
+    for row in rows:
+        row['term'] = term_bucket(row)
+
+    return jsonify(rows)
+
+
 # ── All Purchases View ────────────────────────────────────
 
 @app.route('/api/purchases')
@@ -717,7 +774,7 @@ def get_sidebar():
 
 
 BUILTIN_PAGES = {
-    'dashboard', 'purchases', 'fashion', 'skincare', 'pharmacology', 'goals', 'schedule', 'ai_interface'
+    'dashboard', 'purchases', 'fashion', 'skincare', 'pharmacology', 'goals', 'goal_archive', 'schedule', 'ai_interface'
 }
 
 
