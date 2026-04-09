@@ -732,7 +732,9 @@ def get_goals_archive():
             t.due_date AS target_date,
             t.is_completed,
             1 AS priority,
-            la.name AS area_name
+            la.name AS area_name,
+            NULL AS task_time,
+            NULL AS task_interval
         FROM tasks t
         JOIN life_areas la ON t.life_area_id = la.id
         ORDER BY la.sort_order, t.title
@@ -755,6 +757,8 @@ def get_goals_archive():
                 ELSE 0
             END AS priority,
             COALESCE(ss.label, ci.section_key) AS area_name,
+            ci.task_time,
+            ci.task_interval,
             ci.section_key,
             COALESCE(ci.is_task, 0) AS is_task,
             COALESCE(ci.is_long_term_objective, 0) AS is_long_term_objective,
@@ -777,6 +781,8 @@ def get_goals_archive():
             'source_type': 'goal',
             'item_kind': 'goal',
             'is_goal': 1,
+            'task_time': None,
+            'task_interval': None,
             **row,
         })
 

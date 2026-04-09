@@ -2049,24 +2049,98 @@ async function renderGoalArchive(c) {
   ];
 
   function filterGoals(list) {
+    if (_archiveFilter === 'today') {
+      const today = new Date().toISOString().slice(0, 10);
+      return list.filter(g => isTodayItem(g, today));
+    }
     if (_archiveFilter === 'active') return list.filter(g => !g.is_completed);
     if (_archiveFilter === 'completed') return list.filter(g => g.is_completed);
     return list;
+  }
+
+  function isTodayItem(g, today) {
+    const target = (g.target_date || '').slice(0, 10);
+    if (target) {
+      if (target <= today && !g.is_completed) return true; // overdue + due today
+      if (target === today) return true;
+    }
+    if (g.source_type === 'custom_item' && g.item_kind === 'task' && !g.is_completed) return true;
+    if (g.source_type === 'custom_item' && g.item_kind === 'long_term_objective' && !g.is_completed) return true;
+    return false;
+  }
+
+  function parse12hToMin(t) {
+    if (!t) return null;
+    const m = String(t).trim().toUpperCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/);
+    if (!m) return null;
+    let h = Number(m[1]);
+    const mm = Number(m[2] || 0);
+    const ap = m[3];
+    if (ap === 'PM' && h !== 12) h += 12;
+    if (ap === 'AM' && h === 12) h = 0;
+    return h * 60 + mm;
   }
 
   function buildPage() {
     const filtered = filterGoals(entries);
     const totalActive = entries.filter(g => !g.is_completed).length;
     const totalDone = entries.filter(g => g.is_completed).length;
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const totalToday = entries.filter(g => isTodayItem(g, todayIso)).length;
 
     const filterBar = `
       <div class="archive-filters">
         <span style="font-size:12px;color:var(--text-muted)">Show:</span>
-        ${['all','active','completed'].map(f => `
+        ${['today','all','active','completed'].map(f => `
           <span class="filter-chip ${_archiveFilter === f ? 'active' : ''}" onclick="setArchiveFilter('${f}')">${
-            f === 'all' ? `All (${entries.length})` : f === 'active' ? `Active (${totalActive})` : `Completed (${totalDone})`
+            f === 'today' ? `Today (${totalToday})` : f === 'all' ? `All (${entries.length})` : f === 'active' ? `Active (${totalActive})` : `Completed (${totalDone})`
           }</span>`).join('')}
       </div>`;
+
+    const todayCards = filtered
+      .slice()
+      .sort((a, b) => {
+        const ta = parse12hToMin(a.task_time);
+        const tb = parse12hToMin(b.task_time);
+        if (ta !== null && tb !== null && ta !== tb) return ta - tb;
+        if (ta !== null && tb === null) return -1;
+        if (ta === null && tb !== null) return 1;
+        return (Number(b.priority || 0) - Number(a.priority || 0));
+      })
+      .map(g => {
+        const statusColor = g.is_completed ? 'var(--green)' : (g.priority === 2 ? 'var(--red)' : g.priority === 1 ? 'var(--orange)' : 'var(--blue)');
+        const kindLabel = g.item_kind === 'long_term_objective' ? 'Long-Term Objective' : (g.item_kind === 'task' ? 'Task' : 'Goal');
+        const sourceLabel = g.source_type === 'custom_item' ? 'Custom Section' : (g.source_type === 'task' ? 'Goal Task' : 'Goal');
+        const isEditableGoal = g.source_type === 'goal';
+        const sectionKeyArg = JSON.stringify(String(g.section_key || ''));
+        return `
+          <div class="archive-goal-card ${g.is_completed ? 'completed-card' : ''}">
+            <div class="agc-status" style="background:${statusColor}"></div>
+            <div class="agc-body">
+              <div class="agc-title ${g.is_completed ? 'done' : ''}">${esc(g.title)}</div>
+              ${g.description ? `<div class="agc-desc">${esc(g.description)}</div>` : ''}
+              <div class="agc-tags">
+                <span class="agc-tag area">${esc(g.area_name || '')}</span>
+                <span class="agc-tag">${kindLabel}</span>
+                <span class="agc-tag">${sourceLabel}</span>
+                ${g.task_time ? `<span class="agc-tag">🕒 ${esc(g.task_time)}</span>` : ''}
+                ${g.target_date ? `<span class="agc-tag date">📅 ${esc(g.target_date)}</span>` : ''}
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+              ${isEditableGoal ? `
+                <button class="btn-icon" onclick="openGoalModal(${g.id})" title="Edit">✎</button>
+                <button class="btn-icon ${g.is_completed ? '' : 'btn-danger'}" onclick="archiveToggleGoal(${g.id},${g.is_completed ? 0 : 1})" title="${g.is_completed ? 'Reopen' : 'Complete'}">
+                  ${g.is_completed ? '↩' : '✓'}
+                </button>
+              ` : ''}
+              ${(!isEditableGoal && g.section_key) ? `
+                <button class="btn-icon" onclick='loadPage(${sectionKeyArg})' title="Open section">↗</button>
+              ` : ''}
+            </div>
+          </div>`;
+      })
+      .join('');
 
     const sections = TERMS.map(t => {
       const termGoals = filtered.filter(g => g.term === t.key);
@@ -2130,7 +2204,9 @@ async function renderGoalArchive(c) {
         <button class="btn btn-primary" onclick="openGoalModal()">+ Add Goal</button>
       </div>
       ${filterBar}
-      ${isEmpty ? '<div class="card"><div class="archive-empty">No goals match this filter.</div></div>' : sections}`;
+      ${isEmpty ? '<div class="card"><div class="archive-empty">No goals match this filter.</div></div>' : (_archiveFilter === 'today'
+        ? `<div class="term-section"><div class="term-header"><span class="term-badge short">Today View</span><span class="term-subtitle">Actionable items for ${todayIso}</span><span class="term-count">${filtered.length} item${filtered.length !== 1 ? 's' : ''}</span></div>${todayCards}</div>`
+        : sections)}`;
   }
 
   buildPage();
