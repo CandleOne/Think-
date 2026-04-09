@@ -181,6 +181,8 @@ a:hover { text-decoration: underline; }
 .schedule-task-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .schedule-task-time { font-size: 12px; color: var(--accent); white-space: nowrap; }
 .schedule-task-section { font-size: 11px; color: var(--text-muted); background: var(--surface2); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+.schedule-task-actions { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 0.15s; }
+.schedule-task:hover .schedule-task-actions { opacity: 1; }
 .schedule-empty { padding: 20px 16px; color: var(--text-muted); font-size: 13px; text-align: center; }
 .schedule-subgroup-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 16px 4px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
 .schedule-subgroup-header .subgroup-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
@@ -230,6 +232,7 @@ a:hover { text-decoration: underline; }
 .week-task-past:not(.week-task-done) { opacity: 0.45; }
 .week-now-indicator { font-size: 9px; font-weight: 700; background: var(--accent); color: #fff; padding: 0 5px; border-radius: 4px; margin-left: auto; flex-shrink: 0; }
 .week-next-indicator { font-size: 9px; font-weight: 700; background: var(--purple, #a371f7); color: #fff; padding: 0 5px; border-radius: 4px; margin-left: auto; flex-shrink: 0; }
+.week-edit-btn { margin-left: auto; }
 .live-clock-box { text-align: right; }
 .live-clock { font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1.1; font-variant-numeric: tabular-nums; }
 .live-date { font-size: 13px; color: var(--text-muted); }
@@ -292,6 +295,8 @@ a:hover { text-decoration: underline; }
 /* Early complete */
 .htl-complete-btn { margin-top: 8px; font-size: 10px; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--green); color: var(--green); background: transparent; cursor: pointer; transition: all 0.15s; font-weight: 600; letter-spacing: 0.3px; }
 .htl-complete-btn:hover { background: var(--green); color: var(--bg); }
+.htl-edit-btn { margin-top: 6px; font-size: 10px; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); color: var(--text-muted); background: transparent; cursor: pointer; transition: all 0.15s; }
+.htl-edit-btn:hover { border-color: var(--accent); color: var(--accent); }
 .htl-done .htl-card { border-color: var(--green); opacity: 0.55; }
 .htl-done .htl-card::before { background: var(--green) !important; }
 .htl-done .htl-name { text-decoration: line-through; opacity: 0.7; }
@@ -1871,6 +1876,102 @@ function jumpTlCarousel(pos) {
   loadPage('schedule');
 }
 
+let activeScheduleTaskEdit = null;
+
+function renderTaskIntervalOptions(selected) {
+  const options = ['', 'daily', 'every other day', 'weekly', 'biweekly', 'monthly', 'yearly', 'as needed'];
+  return options.map(v => {
+    const label = v ? v : '—';
+    return `<option value="${esc(v)}" ${String(selected || '') === v ? 'selected' : ''}>${esc(label)}</option>`;
+  }).join('');
+}
+
+function toggleScheduleTaskTimeField() {
+  const quick = document.getElementById('schedule-is-qo-check');
+  const field = document.getElementById('schedule-time-field-wrap');
+  if (!quick || !field) return;
+  field.style.display = quick.checked ? 'none' : 'block';
+}
+
+async function openScheduleTaskEditModal(sectionKey, taskId) {
+  if (!sectionKey || !taskId) return;
+  const items = await getList('custom/' + sectionKey, 'Failed to load task details', { toastOnError: true });
+  const item = items.find(i => Number(i.id) === Number(taskId));
+  if (!item) {
+    toast('Task not found in section');
+    return;
+  }
+
+  activeScheduleTaskEdit = { sectionKey, itemId: Number(taskId), item };
+  openModal(`
+    <h3>Edit Scheduled Task</h3>
+    <form id="schedule-task-form">
+      <div class="form-row">
+        <div class="form-group"><label>Name</label><input name="name" value="${esc(item.name || '')}" required></div>
+        <div class="form-group"><label>Status</label>${statusSelect(Number(item.status_id || 1), 'status_id')}</div>
+      </div>
+      <div class="form-group"><label>Notes</label><textarea name="notes">${esc(item.notes || '')}</textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label>Subgroup</label><input name="subgroup" value="${esc(item.subgroup || '')}" placeholder="Morning, Afternoon, Evening..."></div>
+        <div class="form-group"><label>Sort Order</label><input type="number" name="sort_order" value="${Number(item.sort_order || 0)}"></div>
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" id="schedule-is-qo-check" ${Number(item.is_quick_objective || 0) ? 'checked' : ''} onchange="toggleScheduleTaskTimeField()"> Quick objective (no fixed time)</label>
+      </div>
+      <div class="form-row" id="schedule-time-field-wrap" style="display:${Number(item.is_quick_objective || 0) ? 'none' : 'flex'}">
+        <div class="form-group"><label>Task Time</label><input name="task_time" value="${esc(item.task_time || '')}" placeholder="e.g. 8:00 AM"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Task Count</label><input type="number" name="task_count" value="${item.task_count || ''}" min="1"></div>
+        <div class="form-group"><label>Interval</label>
+          <select name="task_interval">${renderTaskIntervalOptions(item.task_interval)}</select>
+        </div>
+      </div>
+    </form>
+    <div class="modal-actions" style="justify-content:space-between">
+      <button class="btn" onclick="navigateTo('${esc(sectionKey)}');closeModal()">Open Section</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveScheduleTaskEdits()">Save</button>
+      </div>
+    </div>
+  `);
+}
+
+async function saveScheduleTaskEdits() {
+  if (!activeScheduleTaskEdit) {
+    toast('No task selected');
+    return;
+  }
+  const { sectionKey, itemId, item } = activeScheduleTaskEdit;
+  const data = getFormData('schedule-task-form');
+  const quick = document.getElementById('schedule-is-qo-check');
+  const payload = {
+    name: (data.name || '').trim(),
+    status_id: Number(data.status_id || item.status_id || 1),
+    link: item.link || null,
+    notes: data.notes || null,
+    sort_order: Number(data.sort_order || 0),
+    is_task: 1,
+    task_time: quick && quick.checked ? null : (data.task_time || null),
+    task_count: data.task_count ? Number(data.task_count) : null,
+    task_interval: data.task_interval || null,
+    subgroup: data.subgroup || null,
+    is_quick_objective: quick && quick.checked ? 1 : 0,
+    is_long_term_objective: Number(item.is_long_term_objective || 0),
+  };
+  if (!payload.name) {
+    toast('Task name is required');
+    return;
+  }
+  const res = await api('custom/' + sectionKey + '/' + itemId, { method: 'PUT', body: payload });
+  if (showApiError(res)) return;
+  closeModal();
+  activeScheduleTaskEdit = null;
+  toast('Schedule task updated');
+  loadPage('schedule');
+}
+
 function toggleWeekTask(dayIdx, taskId, checked) {
   const store = JSON.parse(localStorage.getItem('weekChecks') || '{}');
   const now = new Date();
@@ -2093,6 +2194,10 @@ async function renderSchedule(c) {
       ${isQO ? '<span class="schedule-task-time" style="font-style:italic;opacity:0.6">anytime</span>' : (t.task_time ? `<span class="schedule-task-time">${esc(t.task_time)}</span>` : '')}
       ${t.task_count ? `<span class="schedule-task-time">${t.task_count}×</span>` : ''}
       ${showSection ? `<span class="schedule-task-section">${esc(t.section_label)}</span>` : ''}
+      <div class="schedule-task-actions">
+        <button class="btn-icon" onclick="openScheduleTaskEditModal('${esc(t.section_key)}', ${t.id})" title="Edit task">✎</button>
+        <button class="btn-icon" onclick="navigateTo('${esc(t.section_key)}')" title="Open section">↗</button>
+      </div>
     </div>`;
   }
 
@@ -2218,6 +2323,7 @@ async function renderSchedule(c) {
           ${earlyDone ? '<div class="htl-badge" style="color:var(--green);font-size:10px;font-weight:600">✓ Done</div>' : ''}
           ${t.subgroup ? `<div class="htl-sg" style="color:${sgColor(t)}">${esc(t.subgroup)}</div>` : ''}
           ${showComplete ? `<button class="htl-complete-btn" onclick="htlCompleteEarly('${tid}')">Complete ✓</button>` : ''}
+          <button class="htl-edit-btn" onclick="openScheduleTaskEditModal('${esc(t.section_key)}', ${t.id})">Edit</button>
         </div>
       </div>${rail}`;
     }).join('');
@@ -2322,6 +2428,7 @@ async function renderSchedule(c) {
                 <span class="week-task-name">${esc(t.name)}</span>
                 ${isCurrent ? '<span class="week-now-indicator">NOW</span>' : ''}
                 ${isNext ? '<span class="week-next-indicator">NEXT</span>' : ''}
+                <button type="button" class="btn-icon week-edit-btn" onclick="event.preventDefault();event.stopPropagation();openScheduleTaskEditModal('${esc(t.section_key)}', ${t.id})" title="Edit task">✎</button>
               </label>`;
             }).join('')}`;
           }).join('')}
