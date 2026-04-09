@@ -25,6 +25,50 @@ class PlanResult:
     updates: list[dict[str, Any]]
 
 
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    """Parse first valid JSON object from arbitrary model text."""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+
+    start_positions = [idx for idx, ch in enumerate(raw) if ch == "{"]
+    for start in start_positions:
+        depth = 0
+        in_string = False
+        escaped = False
+        for i in range(start, len(raw)):
+            ch = raw[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = raw[start:i + 1]
+                    try:
+                        parsed = json.loads(candidate)
+                        if isinstance(parsed, dict):
+                            return parsed
+                    except Exception:
+                        break
+    return None
+
+
 def _get_provider_env() -> tuple[str, str, bool]:
     """Resolve active AI provider from env with safe fallback ordering."""
     requested = (os.environ.get("AI_BRAIN_PROVIDER") or "").strip().lower()
@@ -166,7 +210,7 @@ def _heuristic_schedule(tasks: list[dict[str, Any]], preferences: dict[str, Any]
     return PlanResult(mode="heuristic", summary=summary, updates=updates)
 
 
-def _call_openai_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+def _call_openai_json(system_prompt: str, user_prompt: str, max_tokens: int = 1800) -> dict[str, Any] | None:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return None
@@ -182,6 +226,7 @@ def _call_openai_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | 
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.2,
+        "max_tokens": _sanitize_token_limit(max_tokens, default=1800),
     }
     data = json.dumps(payload).encode("utf-8")
     req = urllib_request.Request(
@@ -198,12 +243,12 @@ def _call_openai_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | 
         with urllib_request.urlopen(req, timeout=45) as resp:
             body = json.loads(resp.read().decode("utf-8"))
             content = body["choices"][0]["message"]["content"]
-            return json.loads(content)
+            return _extract_json_object(str(content))
     except Exception:
         return None
 
 
-def _call_claude_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+def _call_claude_json(system_prompt: str, user_prompt: str, max_tokens: int = 1800) -> dict[str, Any] | None:
     api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY")
     if not api_key:
         return None
@@ -214,11 +259,12 @@ def _call_claude_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | 
         "x-api-key": api_key,
         "anthropic-version": os.environ.get("ANTHROPIC_VERSION", "2023-06-01"),
     }
+    token_limit = _sanitize_token_limit(max_tokens, default=1800)
 
     for model in _claude_model_candidates():
         payload = {
             "model": model,
-            "max_tokens": 1800,
+            "max_tokens": token_limit,
             "temperature": 0.2,
             "system": system_prompt + " Return valid JSON only.",
             "messages": [
@@ -244,7 +290,7 @@ def _call_claude_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | 
                 raw = "\n".join(text_parts).strip()
                 if not raw:
                     return None
-                return json.loads(raw)
+                return _extract_json_object(raw)
         except HTTPError as err:
             try:
                 body_text = err.read().decode("utf-8", errors="ignore")
@@ -259,18 +305,18 @@ def _call_claude_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | 
     return None
 
 
-def _call_ai_json(system_prompt: str, user_prompt: str) -> tuple[str, dict[str, Any] | None]:
+def _call_ai_json(system_prompt: str, user_prompt: str, max_tokens: int = 1800) -> tuple[str, dict[str, Any] | None]:
     provider, _, configured = _get_provider_env()
     if provider == "claude" and configured:
-        return "claude", _call_claude_json(system_prompt, user_prompt)
+        return "claude", _call_claude_json(system_prompt, user_prompt, max_tokens=max_tokens)
     if provider == "openai" and configured:
-        return "openai", _call_openai_json(system_prompt, user_prompt)
+        return "openai", _call_openai_json(system_prompt, user_prompt, max_tokens=max_tokens)
 
     # Auto fallback attempt when provider is not explicitly configured.
-    claude = _call_claude_json(system_prompt, user_prompt)
+    claude = _call_claude_json(system_prompt, user_prompt, max_tokens=max_tokens)
     if claude:
         return "claude", claude
-    openai = _call_openai_json(system_prompt, user_prompt)
+    openai = _call_openai_json(system_prompt, user_prompt, max_tokens=max_tokens)
     if openai:
         return "openai", openai
     return "heuristic", None
@@ -450,6 +496,167 @@ def query_ai(prompt: str, context: dict[str, Any] | None = None, token_limit: in
     return {
         "mode": "heuristic",
         "answer": answer,
+        "token_limit": effective_token_limit,
+    }
+
+
+def query_ai_empowered(prompt: str, context: dict[str, Any] | None = None, token_limit: int | None = None) -> dict[str, Any]:
+    """Return an AI response that can include structured database edits.
+
+    Expected JSON shape from model:
+    {
+      "answer": "...",
+      "edits": [
+        {"op": "update", "table": "custom_items", "id": 10, "fields": {"task_time": "8:00 AM"}},
+        {"op": "insert", "table": "goals", "fields": {...}},
+        {"op": "delete", "table": "fashion_items", "id": 5}
+      ]
+    }
+    """
+    context = context or {}
+    clean_prompt = str(prompt or "").strip()
+    effective_token_limit = _sanitize_token_limit(token_limit, default=1200)
+    if not clean_prompt:
+        return {
+            "mode": "heuristic",
+            "answer": "Please provide a request.",
+            "edits": [],
+            "token_limit": effective_token_limit,
+        }
+
+    def compact_ctx(value, depth=0):
+        if depth > 4:
+            return None
+        if isinstance(value, dict):
+            return {str(k): compact_ctx(v, depth + 1) for k, v in value.items()}
+        if isinstance(value, list):
+            return [compact_ctx(v, depth + 1) for v in value]
+        if isinstance(value, str):
+            if len(value) > 220:
+                return value[:220] + "..."
+            return value
+        return value
+
+    user_payload = {
+        "request": clean_prompt,
+        "context": context,
+        "now": datetime.utcnow().isoformat() + "Z",
+    }
+
+    provider, llm_result = _call_ai_json(
+        system_prompt=(
+            "You are an empowered life optimization copilot. "
+            "You can propose structured database edits to improve schedules, routines, goals, and planning data. "
+            "Always return JSON with keys: answer (string), edits (array). "
+            "Each edit must use one of: update|insert|delete and include table. "
+            "For update/delete include id. For insert/update include fields object. "
+            "Only propose edits that are directly useful for the user's request."
+        ),
+        user_prompt=json.dumps(user_payload, ensure_ascii=True),
+        max_tokens=effective_token_limit,
+    )
+
+    # If the full payload is too large for provider processing, retry with compacted text fields.
+    if llm_result is None:
+        compact_payload = {
+            "request": clean_prompt,
+            "context": compact_ctx(context),
+            "now": datetime.utcnow().isoformat() + "Z",
+            "compact_mode": True,
+        }
+        provider, llm_result = _call_ai_json(
+            system_prompt=(
+                "You are an empowered life optimization copilot. "
+                "The context may be compacted for token safety. "
+                "Return JSON with keys: answer (string), edits (array)."
+            ),
+            user_prompt=json.dumps(compact_payload, ensure_ascii=True),
+            max_tokens=effective_token_limit,
+        )
+
+    if llm_result and isinstance(llm_result, dict):
+        answer = str(llm_result.get("answer") or "").strip()
+        edits = llm_result.get("edits") if isinstance(llm_result.get("edits"), list) else []
+        clean_edits = []
+        for edit in edits:
+            if not isinstance(edit, dict):
+                continue
+            op = str(edit.get("op") or "").strip().lower()
+            table = str(edit.get("table") or "").strip()
+            if op not in {"update", "insert", "delete"} or not table:
+                continue
+            item = {"op": op, "table": table}
+            if "id" in edit:
+                try:
+                    item["id"] = int(edit.get("id"))
+                except (TypeError, ValueError):
+                    continue
+            if "fields" in edit and isinstance(edit.get("fields"), dict):
+                item["fields"] = edit.get("fields")
+            clean_edits.append(item)
+
+        # If the model gave recommendations but no edits, ask for a strict edit translation.
+        if answer and not clean_edits:
+            _, edits_only = _call_ai_json(
+                system_prompt=(
+                    "Convert a planning recommendation into executable DB edits. "
+                    "Return JSON object with key edits (array) only. "
+                    "Use ops update|insert|delete and include table, id (for update/delete), and fields (for insert/update)."
+                ),
+                user_prompt=json.dumps(
+                    {
+                        "request": clean_prompt,
+                        "recommendation": answer,
+                        "context": compact_ctx(context),
+                    },
+                    ensure_ascii=True,
+                ),
+                max_tokens=effective_token_limit,
+            )
+            if isinstance(edits_only, dict) and isinstance(edits_only.get("edits"), list):
+                for edit in edits_only.get("edits"):
+                    if not isinstance(edit, dict):
+                        continue
+                    op = str(edit.get("op") or "").strip().lower()
+                    table = str(edit.get("table") or "").strip()
+                    if op not in {"update", "insert", "delete"} or not table:
+                        continue
+                    item = {"op": op, "table": table}
+                    if "id" in edit:
+                        try:
+                            item["id"] = int(edit.get("id"))
+                        except (TypeError, ValueError):
+                            continue
+                    if "fields" in edit and isinstance(edit.get("fields"), dict):
+                        item["fields"] = edit.get("fields")
+                    clean_edits.append(item)
+
+        if answer or clean_edits:
+            return {
+                "mode": provider,
+                "answer": answer or "I prepared an empowered plan.",
+                "edits": clean_edits,
+                "token_limit": effective_token_limit,
+            }
+
+    # If structured output fails, still return provider answer via normal query path.
+    basic = query_ai(clean_prompt, context, token_limit=effective_token_limit)
+    if basic.get("mode") != "heuristic":
+        return {
+            "mode": basic.get("mode", "heuristic"),
+            "answer": basic.get("answer", ""),
+            "edits": [],
+            "token_limit": effective_token_limit,
+        }
+
+    # Heuristic fallback when provider call fails.
+    return {
+        "mode": "heuristic",
+        "answer": (
+            "I can propose and apply structured edits across your app data. "
+            "Ask for specific outcomes (for example: rebalance weekly routine, tighten goal milestones, or refactor section priorities)."
+        ),
+        "edits": [],
         "token_limit": effective_token_limit,
     }
 

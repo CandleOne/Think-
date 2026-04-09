@@ -32,7 +32,7 @@ def load_local_env(env_path='.env'):
 
 load_local_env()
 
-from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info, query_ai
+from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info, query_ai, query_ai_empowered
 
 app = Flask(__name__, static_folder='static')
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lifeoptimization.db')
@@ -890,6 +890,8 @@ def ai_query():
         return api_error('prompt is required', 400)
 
     include_schedule_context = 1 if int(data.get('include_schedule_context', 0) or 0) else 0
+    empowered = 1 if int(data.get('empowered', 0) or 0) else 0
+    apply_changes = 1 if int(data.get('apply_changes', 0) or 0) else 0
     history = data.get('history') if isinstance(data.get('history'), list) else []
     token_limit_raw = data.get('token_limit', data.get('reason_token_limit', 700))
     try:
@@ -900,6 +902,94 @@ def ai_query():
     context = {
         'history': history,
     }
+
+    allowed_tables = {
+        'statuses', 'life_areas', 'fashion_categories', 'fashion_items',
+        'skincare_routines', 'skincare_products', 'pharmacology_items',
+        'goals', 'sidebar_sections', 'custom_items'
+    }
+
+    def table_columns(conn, table_name):
+        rows = conn.execute(f'PRAGMA table_info({table_name})').fetchall()
+        return [row['name'] for row in rows]
+
+    def apply_empowered_edits(conn, edits):
+        applied = 0
+        results = []
+        cols_cache = {}
+
+        for idx, raw in enumerate(edits):
+            if not isinstance(raw, dict):
+                results.append({'index': idx, 'ok': False, 'error': 'Edit must be an object'})
+                continue
+
+            op = str(raw.get('op') or '').strip().lower()
+            table = str(raw.get('table') or '').strip()
+            if op not in {'insert', 'update', 'delete'}:
+                results.append({'index': idx, 'ok': False, 'error': 'Invalid op'})
+                continue
+            if table not in allowed_tables:
+                results.append({'index': idx, 'ok': False, 'error': f'Table not allowed: {table}'})
+                continue
+
+            if table not in cols_cache:
+                cols_cache[table] = table_columns(conn, table)
+            cols = set(cols_cache[table])
+
+            if op == 'delete':
+                try:
+                    item_id = int(raw.get('id'))
+                except (TypeError, ValueError):
+                    results.append({'index': idx, 'ok': False, 'error': 'delete requires integer id'})
+                    continue
+                cur = conn.execute(f'DELETE FROM {table} WHERE id=?', (item_id,))
+                ok = cur.rowcount > 0
+                results.append({'index': idx, 'ok': ok, 'op': op, 'table': table, 'id': item_id})
+                if ok:
+                    applied += 1
+                continue
+
+            fields = raw.get('fields') if isinstance(raw.get('fields'), dict) else None
+            if not fields:
+                results.append({'index': idx, 'ok': False, 'error': f'{op} requires fields object'})
+                continue
+
+            blocked = {'id', 'created_at'}
+            valid_pairs = [(k, v) for k, v in fields.items() if k in cols and k not in blocked]
+            if not valid_pairs:
+                results.append({'index': idx, 'ok': False, 'error': 'No valid fields for table'})
+                continue
+
+            if op == 'insert':
+                col_names = [k for k, _ in valid_pairs]
+                placeholders = ','.join(['?'] * len(valid_pairs))
+                sql = f"INSERT INTO {table} ({','.join(col_names)}) VALUES ({placeholders})"
+                vals = [v for _, v in valid_pairs]
+                cur = conn.execute(sql, vals)
+                results.append({'index': idx, 'ok': True, 'op': op, 'table': table, 'id': cur.lastrowid})
+                applied += 1
+                continue
+
+            # update
+            try:
+                item_id = int(raw.get('id'))
+            except (TypeError, ValueError):
+                results.append({'index': idx, 'ok': False, 'error': 'update requires integer id'})
+                continue
+
+            set_parts = [f"{k}=?" for k, _ in valid_pairs]
+            vals = [v for _, v in valid_pairs]
+            if 'updated_at' in cols and 'updated_at' not in [k for k, _ in valid_pairs]:
+                set_parts.append("updated_at=datetime('now')")
+
+            sql = f"UPDATE {table} SET {', '.join(set_parts)} WHERE id=?"
+            cur = conn.execute(sql, vals + [item_id])
+            ok = cur.rowcount > 0
+            results.append({'index': idx, 'ok': ok, 'op': op, 'table': table, 'id': item_id})
+            if ok:
+                applied += 1
+
+        return applied, results
 
     db = get_db()
     if include_schedule_context:
@@ -914,8 +1004,41 @@ def ai_query():
             '''
         ).fetchall()
         context['schedule_tasks'] = rows_to_list(schedule_rows)
-    db.close()
+    if empowered:
+        full_data = {}
+        for table in sorted(allowed_tables):
+            try:
+                rows = db.execute(f'SELECT * FROM {table} ORDER BY id LIMIT 2000').fetchall()
+                full_data[table] = rows_to_list(rows)
+            except sqlite3.OperationalError:
+                full_data[table] = []
+        context['full_data'] = full_data
 
+    if empowered:
+        result = query_ai_empowered(prompt, context, token_limit=token_limit)
+        edits = result.get('edits') if isinstance(result.get('edits'), list) else []
+        applied_count = 0
+        edit_results = []
+        if apply_changes and edits:
+            try:
+                applied_count, edit_results = apply_empowered_edits(db, edits)
+                db.commit()
+            except sqlite3.IntegrityError as exc:
+                db.rollback()
+                db.close()
+                return api_error(f'Database constraint error during AI apply: {exc}', 409)
+        db.close()
+        return jsonify({
+            'ok': True,
+            'mode': result.get('mode', 'heuristic'),
+            'answer': result.get('answer', ''),
+            'token_limit': result.get('token_limit', token_limit),
+            'proposed_edits': len(edits),
+            'applied_edits': applied_count,
+            'edit_results': edit_results[:100],
+        })
+
+    db.close()
     result = query_ai(prompt, context, token_limit=token_limit)
     return jsonify({
         'ok': True,

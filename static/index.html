@@ -760,7 +760,11 @@ async function renderAiInterface(c) {
             </div>
           </div>
           <div class="ai-query-actions">
-            <label style="font-size:13px;color:var(--text-muted)"><input type="checkbox" id="ai-include-schedule" checked> Include schedule context</label>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+              <label style="font-size:13px;color:var(--text-muted)"><input type="checkbox" id="ai-include-schedule" checked> Include schedule context</label>
+              <label style="font-size:13px;color:var(--text-muted)"><input type="checkbox" id="ai-empowered" checked onchange="toggleAiApplyOption()"> Empowered mode (full data visibility)</label>
+              <label style="font-size:13px;color:var(--text-muted)"><input type="checkbox" id="ai-apply-changes"> Allow AI to apply edits</label>
+            </div>
             <div style="display:flex;gap:8px">
               <button type="button" class="btn" onclick="seedAiPrompt('Optimize my current schedule and show the top 5 changes with reasons.')">Use Prompt Template</button>
               <button type="submit" class="btn btn-primary">Send</button>
@@ -784,10 +788,24 @@ function resetAiChat() {
   renderAiMessages();
 }
 
+function toggleAiApplyOption() {
+  const empowered = document.getElementById('ai-empowered');
+  const apply = document.getElementById('ai-apply-changes');
+  if (!empowered || !apply) return;
+  if (!empowered.checked) {
+    apply.checked = false;
+    apply.disabled = true;
+  } else {
+    apply.disabled = false;
+  }
+}
+
 async function sendAiQuery() {
   const input = document.getElementById('ai-query-input');
   const includeSchedule = document.getElementById('ai-include-schedule');
   const tokenLimitEl = document.getElementById('ai-token-limit');
+  const empoweredEl = document.getElementById('ai-empowered');
+  const applyChangesEl = document.getElementById('ai-apply-changes');
   if (!input) return;
   const prompt = (input.value || '').trim();
   if (!prompt) {
@@ -812,6 +830,8 @@ async function sendAiQuery() {
       history,
       include_schedule_context: includeSchedule && includeSchedule.checked ? 1 : 0,
       token_limit: tokenLimitEl && tokenLimitEl.value ? Number(tokenLimitEl.value) : 700,
+      empowered: empoweredEl && empoweredEl.checked ? 1 : 0,
+      apply_changes: applyChangesEl && applyChangesEl.checked ? 1 : 0,
     },
   });
 
@@ -822,10 +842,13 @@ async function sendAiQuery() {
     return;
   }
 
+  const editMeta = (res.proposed_edits !== undefined)
+    ? ` · edits ${res.applied_edits || 0}/${res.proposed_edits || 0}`
+    : '';
   aiChatHistory.push({
     role: 'assistant',
     content: String(res.answer || '').trim() || 'No answer returned.',
-    mode: `${res.mode || 'heuristic'} · limit ${res.token_limit || 'n/a'}`,
+    mode: `${res.mode || 'heuristic'} · limit ${res.token_limit || 'n/a'}${editMeta}`,
   });
   renderAiMessages();
 }
