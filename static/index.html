@@ -2135,6 +2135,16 @@ async function renderGoalArchive(c) {
     const now = nowInTZ();
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const dayEnd = 22 * 60;
+    const defaultTaskMinutes = 45;
+
+    function fmtMin(m) {
+      const safe = ((m % (24 * 60)) + (24 * 60)) % (24 * 60);
+      let h = Math.floor(safe / 60);
+      const mm = safe % 60;
+      const ap = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      return `${h}:${String(mm).padStart(2, '0')} ${ap}`;
+    }
 
     const todaySchedule = entries
       .filter(g => g.source_type === 'custom_item' && g.item_kind === 'task' && Number(g.is_schedule_section || 0) === 1 && !g.is_completed)
@@ -2148,13 +2158,69 @@ async function renderGoalArchive(c) {
         return String(a.title || '').localeCompare(String(b.title || ''));
       });
 
-    const remainingScheduled = todaySchedule.filter(t => {
-      const tm = parse12hToMin(t.task_time);
-      return tm === null || tm >= nowMin;
-    });
-    const scheduledRemainingMinutes = remainingScheduled.length * 45;
+    const timedSchedule = todaySchedule
+      .map(t => {
+        const start = parse12hToMin(t.task_time);
+        return {
+          ...t,
+          start,
+          end: start == null ? null : Math.min(dayEnd, start + defaultTaskMinutes),
+        };
+      })
+      .filter(t => t.start != null)
+      .sort((a, b) => (a.start - b.start));
+
+    const remainingTimed = timedSchedule.filter(t => t.end > nowMin);
+    const scheduledRemainingMinutes = remainingTimed.reduce((acc, t) => {
+      const s = Math.max(t.start, nowMin);
+      return acc + Math.max(0, t.end - s);
+    }, 0);
+
     const remainingWindowMinutes = Math.max(0, dayEnd - nowMin);
-    const goalBudgetMinutes = Math.max(0, Math.min(240, remainingWindowMinutes - scheduledRemainingMinutes));
+
+    // Build free windows between now and end of day using timed tasks as occupied blocks.
+    const occupied = remainingTimed.map(t => ({
+      start: Math.max(nowMin, t.start),
+      end: Math.min(dayEnd, t.end),
+    })).filter(b => b.end > b.start);
+
+    const merged = [];
+    for (const b of occupied) {
+      if (!merged.length || b.start > merged[merged.length - 1].end) {
+        merged.push({ ...b });
+      } else {
+        merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, b.end);
+      }
+    }
+
+    const freeSlots = [];
+    let cursor = nowMin;
+    for (const b of merged) {
+      if (b.start > cursor) freeSlots.push({ start: cursor, end: b.start });
+      cursor = Math.max(cursor, b.end);
+    }
+    if (cursor < dayEnd) freeSlots.push({ start: cursor, end: dayEnd });
+
+    let goalBudgetMinutes = freeSlots.reduce((acc, s) => acc + Math.max(0, s.end - s.start), 0);
+    goalBudgetMinutes = Math.min(goalBudgetMinutes, 240);
+
+    const unscheduledTodayTasks = todaySchedule.filter(t => parse12hToMin(t.task_time) == null);
+    const reserveForUnscheduled = Math.min(goalBudgetMinutes, unscheduledTodayTasks.length * 25);
+    goalBudgetMinutes = Math.max(0, goalBudgetMinutes - reserveForUnscheduled);
+
+    const allocSlots = freeSlots.map(s => ({ ...s }));
+
+    function allocateInFreeSlots(minutes) {
+      for (const s of allocSlots) {
+        const cap = s.end - s.start;
+        if (cap >= minutes) {
+          const out = { start: s.start, end: s.start + minutes };
+          s.start += minutes;
+          return out;
+        }
+      }
+      return null;
+    }
 
     const goalCandidates = entries
       .filter(g => g.source_type === 'goal' && !g.is_completed)
@@ -2174,15 +2240,20 @@ async function renderGoalArchive(c) {
     const recommendedGoals = [];
     let usedMinutes = 0;
     for (const g of goalCandidates) {
-      if (usedMinutes + g.sessionMinutes <= goalBudgetMinutes) {
-        recommendedGoals.push(g);
-        usedMinutes += g.sessionMinutes;
-      }
+      if (usedMinutes + g.sessionMinutes > goalBudgetMinutes) continue;
+      const slot = allocateInFreeSlots(g.sessionMinutes);
+      if (!slot) continue;
+      recommendedGoals.push({ ...g, suggested_start: slot.start, suggested_end: slot.end });
+      usedMinutes += g.sessionMinutes;
       if (recommendedGoals.length >= 4) break;
     }
     if (!recommendedGoals.length && goalCandidates.length) {
-      recommendedGoals.push(goalCandidates[0]);
-      usedMinutes = goalCandidates[0].sessionMinutes;
+      const fallback = goalCandidates[0];
+      const slot = allocateInFreeSlots(Math.min(fallback.sessionMinutes, 30));
+      if (slot) {
+        recommendedGoals.push({ ...fallback, suggested_start: slot.start, suggested_end: slot.end });
+        usedMinutes = slot.end - slot.start;
+      }
     }
 
     const scheduleCards = todaySchedule.map(g => {
@@ -2217,6 +2288,7 @@ async function renderGoalArchive(c) {
               <span class="agc-tag area">${esc(g.area_name || '')}</span>
               <span class="agc-tag">~${g.sessionMinutes} min block</span>
               <span class="agc-tag">score ${Math.round(g.opportunityScore)}</span>
+                ${g.suggested_start != null ? `<span class="agc-tag">🕒 ${fmtMin(g.suggested_start)} - ${fmtMin(g.suggested_end)}</span>` : ''}
               ${g.target_date ? `<span class="agc-tag date ${overdue ? 'overdue' : ''}">📅 ${esc(g.target_date)}${dueToday ? ' (today)' : (overdue ? ' ⚠' : '')}</span>` : ''}
             </div>
             ${g.ai_reasoning ? `<div class="today-goal-score" style="margin-top:6px">${esc(g.ai_reasoning)}</div>` : ''}
@@ -2301,6 +2373,7 @@ async function renderGoalArchive(c) {
                <span class="today-stat">Now: ${formatLiveClock()}</span>
                <span class="today-stat">Remaining window: ${Math.floor(remainingWindowMinutes / 60)}h ${remainingWindowMinutes % 60}m</span>
                <span class="today-stat">Scheduled load: ${Math.floor(scheduledRemainingMinutes / 60)}h ${scheduledRemainingMinutes % 60}m</span>
+               <span class="today-stat">Unscheduled tasks: ${unscheduledTodayTasks.length}</span>
                <span class="today-stat">Goal budget: ${Math.floor(goalBudgetMinutes / 60)}h ${goalBudgetMinutes % 60}m</span>
              </div>
              <div class="today-combo">
