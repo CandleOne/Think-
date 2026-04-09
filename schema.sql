@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS sidebar_sections (
     sort_order INTEGER DEFAULT 0,
     is_builtin INTEGER DEFAULT 0,
     is_schedule INTEGER DEFAULT 0,
+    is_long_term_section INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -166,6 +167,8 @@ CREATE TABLE IF NOT EXISTS custom_items (
     task_interval TEXT,
     subgroup TEXT,
     is_quick_objective INTEGER DEFAULT 0,
+    is_long_term_objective INTEGER DEFAULT 0,
+    objective_completed INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );

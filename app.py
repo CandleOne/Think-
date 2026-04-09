@@ -10,6 +10,48 @@ app = Flask(__name__, static_folder='static')
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lifeoptimization.db')
 
 
+def ensure_schema_compatibility():
+    """Apply lightweight, idempotent schema updates for older local databases."""
+    if not os.path.exists(DB_PATH):
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(custom_items)").fetchall()}
+        if 'is_long_term_objective' not in columns:
+            conn.execute('ALTER TABLE custom_items ADD COLUMN is_long_term_objective INTEGER DEFAULT 0')
+        if 'objective_completed' not in columns:
+            conn.execute('ALTER TABLE custom_items ADD COLUMN objective_completed INTEGER DEFAULT 0')
+
+        sidebar_columns = {row[1] for row in conn.execute("PRAGMA table_info(sidebar_sections)").fetchall()}
+        if 'is_long_term_section' not in sidebar_columns:
+            conn.execute('ALTER TABLE sidebar_sections ADD COLUMN is_long_term_section INTEGER DEFAULT 0')
+
+        # For existing Financial Theory data, default non-header rows to long-term objectives.
+        conn.execute('''
+            UPDATE custom_items
+            SET is_long_term_objective = 1
+            WHERE section_key = 'custom_financial_theory'
+              AND COALESCE(is_long_term_objective, 0) = 0
+              AND name NOT LIKE '━━━%'
+        ''')
+        conn.execute('''
+            UPDATE sidebar_sections
+            SET is_long_term_section = 1
+            WHERE page_key = 'custom_financial_theory'
+              AND COALESCE(is_long_term_section, 0) = 0
+        ''')
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Database may not be initialized yet; init scripts can create full schema.
+        pass
+    finally:
+        conn.close()
+
+
+ensure_schema_compatibility()
+
+
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -23,6 +65,158 @@ def row_to_dict(row):
 
 def rows_to_list(rows):
     return [dict(r) for r in rows]
+
+
+def api_error(message, status=400):
+    return jsonify({'error': message}), status
+
+
+def get_json_payload(required_fields=None):
+    if not request.is_json:
+        return None, api_error('Expected application/json request body', 400)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return None, api_error('Invalid JSON body', 400)
+    if required_fields:
+        missing = [field for field in required_fields if field not in data]
+        if missing:
+            return None, api_error(f"Missing required fields: {', '.join(missing)}", 400)
+    return data, None
+
+
+def normalize_fashion_payload(data):
+    try:
+        category_id = int(data['category_id'])
+        status_id = int(data['status_id'])
+    except (TypeError, ValueError):
+        return None, api_error('category_id and status_id must be integers', 400)
+
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return None, api_error('name is required', 400)
+
+    normalized = {
+        'category_id': category_id,
+        'name': name,
+        'status_id': status_id,
+        'link': data.get('link'),
+        'rep_link': data.get('rep_link'),
+        'notes': data.get('notes')
+    }
+    return normalized, None
+
+
+def normalize_skincare_payload(data):
+    try:
+        status_id = int(data['status_id'])
+        step_order = int(data.get('step_order', 0) or 0)
+        is_wanted = int(data.get('is_wanted', 0) or 0)
+    except (TypeError, ValueError):
+        return None, api_error('status_id, step_order, and is_wanted must be integers', 400)
+
+    routine_id = data.get('routine_id')
+    if routine_id in ('', None):
+        routine_id = None
+    else:
+        try:
+            routine_id = int(routine_id)
+        except (TypeError, ValueError):
+            return None, api_error('routine_id must be an integer when provided', 400)
+
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return None, api_error('name is required', 400)
+
+    return {
+        'routine_id': routine_id,
+        'name': name,
+        'status_id': status_id,
+        'step_order': step_order,
+        'is_wanted': is_wanted,
+        'link': data.get('link'),
+        'notes': data.get('notes')
+    }, None
+
+
+def normalize_pharmacology_payload(data):
+    try:
+        status_id = int(data['status_id'])
+    except (TypeError, ValueError):
+        return None, api_error('status_id must be an integer', 400)
+
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return None, api_error('name is required', 400)
+
+    return {
+        'name': name,
+        'status_id': status_id,
+        'dosage': data.get('dosage'),
+        'frequency': data.get('frequency'),
+        'link': data.get('link'),
+        'notes': data.get('notes')
+    }, None
+
+
+def normalize_goal_payload(data):
+    try:
+        life_area_id = int(data['life_area_id'])
+        priority = int(data.get('priority', 0) or 0)
+        is_completed = int(data.get('is_completed', 0) or 0)
+    except (TypeError, ValueError):
+        return None, api_error('life_area_id, priority, and is_completed must be integers', 400)
+
+    title = str(data.get('title', '')).strip()
+    if not title:
+        return None, api_error('title is required', 400)
+
+    return {
+        'life_area_id': life_area_id,
+        'title': title,
+        'description': data.get('description'),
+        'target_date': data.get('target_date'),
+        'priority': priority,
+        'is_completed': is_completed
+    }, None
+
+
+def normalize_custom_payload(data):
+    try:
+        status_id = int(data['status_id'])
+        sort_order = int(data.get('sort_order', 0) or 0)
+        is_task = int(data.get('is_task', 0) or 0)
+        is_quick_objective = int(data.get('is_quick_objective', 0) or 0)
+        is_long_term_objective = int(data.get('is_long_term_objective', 0) or 0)
+    except (TypeError, ValueError):
+        return None, api_error('status_id, sort_order, is_task, is_quick_objective, and is_long_term_objective must be integers', 400)
+
+    task_count = data.get('task_count')
+    if task_count in ('', None):
+        task_count = None
+    else:
+        try:
+            task_count = int(task_count)
+        except (TypeError, ValueError):
+            return None, api_error('task_count must be an integer when provided', 400)
+
+    name = str(data.get('name', '')).strip()
+    if not name:
+        return None, api_error('name is required', 400)
+
+    return {
+        'name': name,
+        'status_id': status_id,
+        'link': data.get('link'),
+        'notes': data.get('notes'),
+        'sort_order': sort_order,
+        'is_task': is_task,
+        'task_time': data.get('task_time'),
+        'task_count': task_count,
+        'task_interval': data.get('task_interval'),
+        'subgroup': data.get('subgroup'),
+        'is_quick_objective': is_quick_objective,
+        'is_long_term_objective': is_long_term_objective
+    }, None
 
 
 # ── Static files ──────────────────────────────────────────
@@ -78,37 +272,67 @@ def get_fashion_items():
 
 @app.route('/api/fashion', methods=['POST'])
 def add_fashion_item():
-    data = request.json
+    data, error = get_json_payload(required_fields=['category_id', 'name', 'status_id'])
+    if error:
+        return error
+    normalized, validation_error = normalize_fashion_payload(data)
+    if validation_error:
+        return validation_error
+
     db = get_db()
-    db.execute(
-        'INSERT INTO fashion_items (category_id, name, status_id, link, rep_link, notes) VALUES (?,?,?,?,?,?)',
-        (data['category_id'], data['name'], data['status_id'],
-         data.get('link'), data.get('rep_link'), data.get('notes')))
-    db.commit()
-    db.close()
+    try:
+        db.execute(
+            'INSERT INTO fashion_items (category_id, name, status_id, link, rep_link, notes) VALUES (?,?,?,?,?,?)',
+            (normalized['category_id'], normalized['name'], normalized['status_id'],
+             normalized['link'], normalized['rep_link'], normalized['notes']))
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
     return jsonify({'ok': True}), 201
 
 
 @app.route('/api/fashion/<int:item_id>', methods=['PUT'])
 def update_fashion_item(item_id):
-    data = request.json
+    data, error = get_json_payload(required_fields=['category_id', 'name', 'status_id'])
+    if error:
+        return error
+    normalized, validation_error = normalize_fashion_payload(data)
+    if validation_error:
+        return validation_error
+
     db = get_db()
-    db.execute('''UPDATE fashion_items 
-                  SET category_id=?, name=?, status_id=?, link=?, rep_link=?, notes=?, updated_at=datetime('now')
-                  WHERE id=?''',
-               (data['category_id'], data['name'], data['status_id'],
-                data.get('link'), data.get('rep_link'), data.get('notes'), item_id))
-    db.commit()
-    db.close()
+    try:
+        cur = db.execute('''UPDATE fashion_items 
+                            SET category_id=?, name=?, status_id=?, link=?, rep_link=?, notes=?, updated_at=datetime('now')
+                            WHERE id=?''',
+                         (normalized['category_id'], normalized['name'], normalized['status_id'],
+                          normalized['link'], normalized['rep_link'], normalized['notes'], item_id))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Fashion item not found', 404)
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
     return jsonify({'ok': True})
 
 
 @app.route('/api/fashion/<int:item_id>', methods=['DELETE'])
 def delete_fashion_item(item_id):
     db = get_db()
-    db.execute('DELETE FROM fashion_items WHERE id=?', (item_id,))
-    db.commit()
-    db.close()
+    try:
+        cur = db.execute('DELETE FROM fashion_items WHERE id=?', (item_id,))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Fashion item not found', 404)
+        db.commit()
+    finally:
+        db.close()
     return jsonify({'ok': True})
 
 
@@ -124,31 +348,42 @@ def get_skincare_routines():
 
 @app.route('/api/skincare/routines', methods=['POST'])
 def add_skincare_routine():
-    data = request.json
+    data, error = get_json_payload(required_fields=['name'])
+    if error:
+        return error
     name = data.get('name', '').strip()
     if not name:
-        return jsonify({'error': 'name required'}), 400
+        return api_error('name required', 400)
     db = get_db()
-    existing = db.execute('SELECT id FROM skincare_routines WHERE name=?', (name,)).fetchone()
-    if existing:
+    try:
+        existing = db.execute('SELECT id FROM skincare_routines WHERE name=?', (name,)).fetchone()
+        if existing:
+            return api_error('Routine already exists', 409)
+        max_order = db.execute('SELECT MAX(sort_order) FROM skincare_routines').fetchone()[0] or 0
+        db.execute('INSERT INTO skincare_routines (name, sort_order) VALUES (?,?)', (name, max_order + 1))
+        db.commit()
+        new_id = db.execute('SELECT id FROM skincare_routines WHERE name=?', (name,)).fetchone()['id']
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
         db.close()
-        return jsonify({'error': 'Routine already exists'}), 409
-    max_order = db.execute('SELECT MAX(sort_order) FROM skincare_routines').fetchone()[0] or 0
-    db.execute('INSERT INTO skincare_routines (name, sort_order) VALUES (?,?)', (name, max_order + 1))
-    db.commit()
-    new_id = db.execute('SELECT id FROM skincare_routines WHERE name=?', (name,)).fetchone()['id']
-    db.close()
     return jsonify({'ok': True, 'id': new_id}), 201
 
 
 @app.route('/api/skincare/routines/<int:routine_id>', methods=['DELETE'])
 def delete_skincare_routine(routine_id):
     db = get_db()
-    # Move products from this routine to "wanted" (unassigned)
-    db.execute('UPDATE skincare_products SET routine_id=NULL, is_wanted=1 WHERE routine_id=?', (routine_id,))
-    db.execute('DELETE FROM skincare_routines WHERE id=?', (routine_id,))
-    db.commit()
-    db.close()
+    try:
+        routine = db.execute('SELECT id FROM skincare_routines WHERE id=?', (routine_id,)).fetchone()
+        if not routine:
+            return api_error('Skincare routine not found', 404)
+        # Move products from this routine to "wanted" (unassigned)
+        db.execute('UPDATE skincare_products SET routine_id=NULL, is_wanted=1 WHERE routine_id=?', (routine_id,))
+        db.execute('DELETE FROM skincare_routines WHERE id=?', (routine_id,))
+        db.commit()
+    finally:
+        db.close()
     return jsonify({'ok': True})
 
 
@@ -168,39 +403,69 @@ def get_skincare_products():
 
 @app.route('/api/skincare', methods=['POST'])
 def add_skincare_product():
-    data = request.json
+    data, error = get_json_payload(required_fields=['name', 'status_id'])
+    if error:
+        return error
+    normalized, validation_error = normalize_skincare_payload(data)
+    if validation_error:
+        return validation_error
+
     db = get_db()
-    db.execute(
-        'INSERT INTO skincare_products (routine_id, name, status_id, step_order, is_wanted, link, notes) VALUES (?,?,?,?,?,?,?)',
-        (data.get('routine_id'), data['name'], data['status_id'],
-         data.get('step_order', 0), data.get('is_wanted', 0),
-         data.get('link'), data.get('notes')))
-    db.commit()
-    db.close()
+    try:
+        db.execute(
+            'INSERT INTO skincare_products (routine_id, name, status_id, step_order, is_wanted, link, notes) VALUES (?,?,?,?,?,?,?)',
+            (normalized['routine_id'], normalized['name'], normalized['status_id'],
+             normalized['step_order'], normalized['is_wanted'],
+             normalized['link'], normalized['notes']))
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
     return jsonify({'ok': True}), 201
 
 
 @app.route('/api/skincare/<int:item_id>', methods=['PUT'])
 def update_skincare_product(item_id):
-    data = request.json
+    data, error = get_json_payload(required_fields=['name', 'status_id'])
+    if error:
+        return error
+    normalized, validation_error = normalize_skincare_payload(data)
+    if validation_error:
+        return validation_error
+
     db = get_db()
-    db.execute('''UPDATE skincare_products 
-                  SET routine_id=?, name=?, status_id=?, step_order=?, is_wanted=?, link=?, notes=?, updated_at=datetime('now')
-                  WHERE id=?''',
-               (data.get('routine_id'), data['name'], data['status_id'],
-                data.get('step_order', 0), data.get('is_wanted', 0),
-                data.get('link'), data.get('notes'), item_id))
-    db.commit()
-    db.close()
+    try:
+        cur = db.execute('''UPDATE skincare_products 
+                            SET routine_id=?, name=?, status_id=?, step_order=?, is_wanted=?, link=?, notes=?, updated_at=datetime('now')
+                            WHERE id=?''',
+                         (normalized['routine_id'], normalized['name'], normalized['status_id'],
+                          normalized['step_order'], normalized['is_wanted'],
+                          normalized['link'], normalized['notes'], item_id))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Skincare product not found', 404)
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
     return jsonify({'ok': True})
 
 
 @app.route('/api/skincare/<int:item_id>', methods=['DELETE'])
 def delete_skincare_product(item_id):
     db = get_db()
-    db.execute('DELETE FROM skincare_products WHERE id=?', (item_id,))
-    db.commit()
-    db.close()
+    try:
+        cur = db.execute('DELETE FROM skincare_products WHERE id=?', (item_id,))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Skincare product not found', 404)
+        db.commit()
+    finally:
+        db.close()
     return jsonify({'ok': True})
 
 
@@ -221,37 +486,67 @@ def get_pharmacology():
 
 @app.route('/api/pharmacology', methods=['POST'])
 def add_pharmacology():
-    data = request.json
+    data, error = get_json_payload(required_fields=['name', 'status_id'])
+    if error:
+        return error
+    normalized, validation_error = normalize_pharmacology_payload(data)
+    if validation_error:
+        return validation_error
+
     db = get_db()
-    db.execute(
-        'INSERT INTO pharmacology_items (name, status_id, dosage, frequency, link, notes) VALUES (?,?,?,?,?,?)',
-        (data['name'], data['status_id'], data.get('dosage'),
-         data.get('frequency'), data.get('link'), data.get('notes')))
-    db.commit()
-    db.close()
+    try:
+        db.execute(
+            'INSERT INTO pharmacology_items (name, status_id, dosage, frequency, link, notes) VALUES (?,?,?,?,?,?)',
+            (normalized['name'], normalized['status_id'], normalized['dosage'],
+             normalized['frequency'], normalized['link'], normalized['notes']))
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
     return jsonify({'ok': True}), 201
 
 
 @app.route('/api/pharmacology/<int:item_id>', methods=['PUT'])
 def update_pharmacology(item_id):
-    data = request.json
+    data, error = get_json_payload(required_fields=['name', 'status_id'])
+    if error:
+        return error
+    normalized, validation_error = normalize_pharmacology_payload(data)
+    if validation_error:
+        return validation_error
+
     db = get_db()
-    db.execute('''UPDATE pharmacology_items 
-                  SET name=?, status_id=?, dosage=?, frequency=?, link=?, notes=?, updated_at=datetime('now')
-                  WHERE id=?''',
-               (data['name'], data['status_id'], data.get('dosage'),
-                data.get('frequency'), data.get('link'), data.get('notes'), item_id))
-    db.commit()
-    db.close()
+    try:
+        cur = db.execute('''UPDATE pharmacology_items 
+                            SET name=?, status_id=?, dosage=?, frequency=?, link=?, notes=?, updated_at=datetime('now')
+                            WHERE id=?''',
+                         (normalized['name'], normalized['status_id'], normalized['dosage'],
+                          normalized['frequency'], normalized['link'], normalized['notes'], item_id))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Pharmacology item not found', 404)
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
     return jsonify({'ok': True})
 
 
 @app.route('/api/pharmacology/<int:item_id>', methods=['DELETE'])
 def delete_pharmacology(item_id):
     db = get_db()
-    db.execute('DELETE FROM pharmacology_items WHERE id=?', (item_id,))
-    db.commit()
-    db.close()
+    try:
+        cur = db.execute('DELETE FROM pharmacology_items WHERE id=?', (item_id,))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Pharmacology item not found', 404)
+        db.commit()
+    finally:
+        db.close()
     return jsonify({'ok': True})
 
 
@@ -272,38 +567,68 @@ def get_goals():
 
 @app.route('/api/goals', methods=['POST'])
 def add_goal():
-    data = request.json
+    data, error = get_json_payload(required_fields=['life_area_id', 'title'])
+    if error:
+        return error
+    normalized, validation_error = normalize_goal_payload(data)
+    if validation_error:
+        return validation_error
+
     db = get_db()
-    db.execute(
-        'INSERT INTO goals (life_area_id, title, description, target_date, priority) VALUES (?,?,?,?,?)',
-        (data['life_area_id'], data['title'], data.get('description'),
-         data.get('target_date'), data.get('priority', 0)))
-    db.commit()
-    db.close()
+    try:
+        db.execute(
+            'INSERT INTO goals (life_area_id, title, description, target_date, priority) VALUES (?,?,?,?,?)',
+            (normalized['life_area_id'], normalized['title'], normalized['description'],
+             normalized['target_date'], normalized['priority']))
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
     return jsonify({'ok': True}), 201
 
 
 @app.route('/api/goals/<int:goal_id>', methods=['PUT'])
 def update_goal(goal_id):
-    data = request.json
+    data, error = get_json_payload(required_fields=['life_area_id', 'title'])
+    if error:
+        return error
+    normalized, validation_error = normalize_goal_payload(data)
+    if validation_error:
+        return validation_error
+
     db = get_db()
-    db.execute('''UPDATE goals 
-                  SET life_area_id=?, title=?, description=?, target_date=?, priority=?, is_completed=?, updated_at=datetime('now')
-                  WHERE id=?''',
-               (data['life_area_id'], data['title'], data.get('description'),
-                data.get('target_date'), data.get('priority', 0),
-                data.get('is_completed', 0), goal_id))
-    db.commit()
-    db.close()
+    try:
+        cur = db.execute('''UPDATE goals 
+                            SET life_area_id=?, title=?, description=?, target_date=?, priority=?, is_completed=?, updated_at=datetime('now')
+                            WHERE id=?''',
+                         (normalized['life_area_id'], normalized['title'], normalized['description'],
+                          normalized['target_date'], normalized['priority'],
+                          normalized['is_completed'], goal_id))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Goal not found', 404)
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
     return jsonify({'ok': True})
 
 
 @app.route('/api/goals/<int:goal_id>', methods=['DELETE'])
 def delete_goal(goal_id):
     db = get_db()
-    db.execute('DELETE FROM goals WHERE id=?', (goal_id,))
-    db.commit()
-    db.close()
+    try:
+        cur = db.execute('DELETE FROM goals WHERE id=?', (goal_id,))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Goal not found', 404)
+        db.commit()
+    finally:
+        db.close()
     return jsonify({'ok': True})
 
 
@@ -322,7 +647,17 @@ def get_all_purchases():
 @app.route('/api/sidebar', methods=['GET'])
 def get_sidebar():
     db = get_db()
-    rows = db.execute('SELECT * FROM sidebar_sections ORDER BY sort_order, id').fetchall()
+    rows = db.execute('''
+        SELECT ss.*, COALESCE(lt.long_term_count, 0) AS long_term_count
+        FROM sidebar_sections ss
+        LEFT JOIN (
+            SELECT section_key, COUNT(*) AS long_term_count
+            FROM custom_items
+            WHERE COALESCE(is_long_term_objective, 0) = 1
+            GROUP BY section_key
+        ) lt ON lt.section_key = ss.page_key
+        ORDER BY ss.sort_order, ss.id
+    ''').fetchall()
     db.close()
     return jsonify(rows_to_list(rows))
 
@@ -353,30 +688,45 @@ def get_schedule():
 
 @app.route('/api/sidebar', methods=['POST'])
 def add_sidebar_section():
-    data = request.json
+    data, error = get_json_payload(required_fields=['label', 'group_name'])
+    if error:
+        return error
     label = data.get('label', '').strip()
     group_name = data.get('group_name', '').strip()
+    section_type = str(data.get('section_type', 'default')).strip().lower()
+    if section_type not in {'default', 'schedule', 'long_term_objective'}:
+        return api_error('section_type must be one of: default, schedule, long_term_objective', 400)
+
     if not label or not group_name:
-        return jsonify({'error': 'label and group_name required'}), 400
+        return api_error('label and group_name required', 400)
     # Check if this matches a known builtin page key
     candidate_key = label.lower().replace(' ', '_')
     if candidate_key in BUILTIN_PAGES:
         page_key = candidate_key
         is_builtin = 1
+        section_type = 'default'
     else:
         page_key = 'custom_' + candidate_key
         is_builtin = 0
+
+    is_schedule = 1 if section_type == 'schedule' else 0
+    is_long_term_section = 1 if section_type == 'long_term_objective' else 0
+
     db = get_db()
-    existing = db.execute('SELECT id FROM sidebar_sections WHERE page_key=?', (page_key,)).fetchone()
-    if existing:
+    try:
+        existing = db.execute('SELECT id FROM sidebar_sections WHERE page_key=?', (page_key,)).fetchone()
+        if existing:
+            return api_error('Section already exists', 409)
+        max_order = db.execute('SELECT MAX(sort_order) FROM sidebar_sections').fetchone()[0] or 0
+        db.execute(
+            'INSERT INTO sidebar_sections (group_name, label, page_key, sort_order, is_builtin, is_schedule, is_long_term_section) VALUES (?,?,?,?,?,?,?)',
+            (group_name, label, page_key, max_order + 1, is_builtin, is_schedule, is_long_term_section))
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
         db.close()
-        return jsonify({'error': 'Section already exists'}), 409
-    max_order = db.execute('SELECT MAX(sort_order) FROM sidebar_sections').fetchone()[0] or 0
-    db.execute(
-        'INSERT INTO sidebar_sections (group_name, label, page_key, sort_order, is_builtin) VALUES (?,?,?,?,?)',
-        (group_name, label, page_key, max_order + 1, is_builtin))
-    db.commit()
-    db.close()
     return jsonify({'ok': True, 'page_key': page_key}), 201
 
 
@@ -396,11 +746,22 @@ def toggle_sidebar_schedule(section_id):
 
 @app.route('/api/sidebar/reorder', methods=['PUT'])
 def reorder_sidebar():
-    data = request.json
+    data, error = get_json_payload(required_fields=['order'])
+    if error:
+        return error
     order = data.get('order', [])
-    if not order:
-        return jsonify({'error': 'order required'}), 400
+    if not isinstance(order, list) or not order:
+        return api_error('order must be a non-empty list', 400)
+    try:
+        order = [int(section_id) for section_id in order]
+    except (TypeError, ValueError):
+        return api_error('order entries must be integers', 400)
+
     db = get_db()
+    existing_ids = {row['id'] for row in db.execute('SELECT id FROM sidebar_sections').fetchall()}
+    if any(section_id not in existing_ids for section_id in order):
+        db.close()
+        return api_error('order contains unknown section id', 404)
     for i, section_id in enumerate(order):
         db.execute('UPDATE sidebar_sections SET sort_order=? WHERE id=?', (i, section_id))
     db.commit()
@@ -444,43 +805,81 @@ def get_custom_items(section_key):
 
 @app.route('/api/custom/<section_key>', methods=['POST'])
 def add_custom_item(section_key):
-    data = request.json
+    data, error = get_json_payload(required_fields=['name', 'status_id'])
+    if error:
+        return error
+    normalized, validation_error = normalize_custom_payload(data)
+    if validation_error:
+        return validation_error
+
     db = get_db()
-    db.execute(
-        'INSERT INTO custom_items (section_key, name, status_id, link, notes, sort_order, is_task, task_time, task_count, task_interval, subgroup, is_quick_objective) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-        (section_key, data['name'], data['status_id'],
-         data.get('link'), data.get('notes'), data.get('sort_order', 0),
-         data.get('is_task', 0), data.get('task_time'), data.get('task_count'), data.get('task_interval'), data.get('subgroup'),
-         data.get('is_quick_objective', 0)))
-    db.commit()
-    db.close()
+    try:
+        db.execute(
+            'INSERT INTO custom_items (section_key, name, status_id, link, notes, sort_order, is_task, task_time, task_count, task_interval, subgroup, is_quick_objective, is_long_term_objective, objective_completed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)',
+            (section_key, normalized['name'], normalized['status_id'],
+             normalized['link'], normalized['notes'], normalized['sort_order'],
+             normalized['is_task'], normalized['task_time'], normalized['task_count'], normalized['task_interval'], normalized['subgroup'],
+             normalized['is_quick_objective'], normalized['is_long_term_objective']))
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
     return jsonify({'ok': True}), 201
 
 
 @app.route('/api/custom/<section_key>/<int:item_id>', methods=['PUT'])
 def update_custom_item(section_key, item_id):
-    data = request.json
+    data, error = get_json_payload(required_fields=['name', 'status_id'])
+    if error:
+        return error
+    normalized, validation_error = normalize_custom_payload(data)
+    if validation_error:
+        return validation_error
+
     db = get_db()
-    db.execute('''UPDATE custom_items
-                  SET name=?, status_id=?, link=?, notes=?, sort_order=?, is_task=?, task_time=?, task_count=?, task_interval=?, subgroup=?, is_quick_objective=?, updated_at=datetime('now')
-                  WHERE id=? AND section_key=?''',
-               (data['name'], data['status_id'], data.get('link'),
-                data.get('notes'), data.get('sort_order', 0),
-                data.get('is_task', 0), data.get('task_time'), data.get('task_count'), data.get('task_interval'),
-                data.get('subgroup'), data.get('is_quick_objective', 0),
-                item_id, section_key))
-    db.commit()
-    db.close()
+    try:
+        cur = db.execute('''UPDATE custom_items
+                                                        SET name=?, status_id=?, link=?, notes=?, sort_order=?, is_task=?, task_time=?, task_count=?, task_interval=?, subgroup=?, is_quick_objective=?, is_long_term_objective=?, updated_at=datetime('now')
+                            WHERE id=? AND section_key=?''',
+                         (normalized['name'], normalized['status_id'], normalized['link'],
+                          normalized['notes'], normalized['sort_order'],
+                          normalized['is_task'], normalized['task_time'], normalized['task_count'], normalized['task_interval'],
+                                                    normalized['subgroup'], normalized['is_quick_objective'], normalized['is_long_term_objective'],
+                          item_id, section_key))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Custom item not found', 404)
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        return api_error(f'Database constraint error: {exc}', 409)
+    finally:
+        db.close()
     return jsonify({'ok': True})
 
 
 @app.route('/api/custom/<section_key>/reorder', methods=['PUT'])
 def reorder_custom_items(section_key):
-    data = request.json
+    data, error = get_json_payload(required_fields=['order'])
+    if error:
+        return error
     order = data.get('order', [])
-    if not order:
-        return jsonify({'error': 'order required'}), 400
+    if not isinstance(order, list) or not order:
+        return api_error('order must be a non-empty list', 400)
+    try:
+        order = [int(item_id) for item_id in order]
+    except (TypeError, ValueError):
+        return api_error('order entries must be integers', 400)
+
     db = get_db()
+    existing_ids = {
+        row['id'] for row in db.execute('SELECT id FROM custom_items WHERE section_key=?', (section_key,)).fetchall()
+    }
+    if any(item_id not in existing_ids for item_id in order):
+        db.close()
+        return api_error('order contains unknown item id', 404)
     for i, item_id in enumerate(order):
         db.execute('UPDATE custom_items SET sort_order=? WHERE id=? AND section_key=?', (i, item_id, section_key))
     db.commit()
@@ -491,10 +890,41 @@ def reorder_custom_items(section_key):
 @app.route('/api/custom/<section_key>/<int:item_id>', methods=['DELETE'])
 def delete_custom_item(section_key, item_id):
     db = get_db()
-    db.execute('DELETE FROM custom_items WHERE id=? AND section_key=?', (item_id, section_key))
-    db.commit()
-    db.close()
+    try:
+        cur = db.execute('DELETE FROM custom_items WHERE id=? AND section_key=?', (item_id, section_key))
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Custom item not found', 404)
+        db.commit()
+    finally:
+        db.close()
     return jsonify({'ok': True})
+
+
+@app.route('/api/custom/<section_key>/<int:item_id>/complete', methods=['PUT'])
+def set_custom_objective_completed(section_key, item_id):
+    data, error = get_json_payload(required_fields=['is_completed'])
+    if error:
+        return error
+    try:
+        is_completed = int(data.get('is_completed', 0) or 0)
+    except (TypeError, ValueError):
+        return api_error('is_completed must be an integer (0 or 1)', 400)
+
+    is_completed = 1 if is_completed else 0
+    db = get_db()
+    try:
+        cur = db.execute(
+            'UPDATE custom_items SET objective_completed=?, updated_at=datetime(\'now\') WHERE id=? AND section_key=?',
+            (is_completed, item_id, section_key)
+        )
+        if cur.rowcount == 0:
+            db.rollback()
+            return api_error('Custom item not found', 404)
+        db.commit()
+    finally:
+        db.close()
+    return jsonify({'ok': True, 'objective_completed': is_completed})
 
 
 # ── Optimize Task Placement ──────────────────────────────

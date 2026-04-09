@@ -48,6 +48,7 @@ a:hover { text-decoration: underline; }
 .nav-item .nav-schedule-toggle { display: none; font-size: 11px; color: var(--text-muted); cursor: pointer; padding: 0 3px; line-height: 1; border-radius: 3px; margin-right: 2px; }
 .nav-item .nav-schedule-toggle:hover { color: var(--accent); background: rgba(88,166,255,0.15); }
 .nav-item:hover .nav-schedule-toggle { display: block; }
+.nav-item .nav-lto-icon { font-size: 12px; margin-right: 6px; flex-shrink: 0; opacity: 0.85; }
 .nav-section { font-size: 11px; text-transform: uppercase; color: var(--text-muted); padding: 16px 20px 6px; letter-spacing: 0.5px; font-weight: 600; display: flex; align-items: center; }
 .nav-section .nav-label { flex: 1; }
 .nav-section .nav-add { display: none; font-size: 16px; color: var(--text-muted); cursor: pointer; padding: 0 2px; line-height: 1; border-radius: 3px; }
@@ -148,9 +149,24 @@ a:hover { text-decoration: underline; }
 .item-notes { font-size: 13px; color: var(--text-muted); padding: 4px 12px 10px 28px; line-height: 1.6; }
 .task-badge { display: inline-block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(88,166,255,0.15); color: var(--blue); padding: 1px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle; }
 .qo-badge { background: rgba(163,113,247,0.15); color: var(--purple, #a371f7); }
+.lto-badge { background: rgba(246,190,46,0.2); color: #ffd86b; }
 .qo-badge-sm { display: inline-block; font-size: 9px; font-weight: 600; background: rgba(163,113,247,0.15); color: var(--purple, #a371f7); padding: 0 4px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
 .schedule-task-qo { border-left: 2px solid var(--purple, #a371f7); }
 .task-schedule { font-size: 12px; color: var(--accent); padding: 2px 12px 4px 28px; }
+
+/* Long-term objective timeline */
+.lto-timeline { margin-top: 6px; }
+.lto-item { display: flex; gap: 10px; }
+.lto-marker { width: 18px; display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+.lto-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 9px; background: var(--orange); box-shadow: 0 0 0 2px rgba(210,153,34,0.25); }
+.lto-line { width: 2px; flex: 1; background: var(--border); margin-top: 5px; }
+.lto-item:last-child .lto-line { display: none; }
+.lto-card { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; background: rgba(22,27,34,0.55); }
+.lto-head { display: flex; align-items: center; gap: 10px; }
+.lto-name { font-size: 15px; flex: 1; }
+.lto-done .lto-name { text-decoration: line-through; color: var(--text-muted); }
+.lto-done .lto-dot { background: var(--green); box-shadow: 0 0 0 2px rgba(63,185,80,0.25); }
+.lto-notes { font-size: 13px; color: var(--text-muted); margin-top: 6px; line-height: 1.55; }
 
 /* Schedule view */
 .schedule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
@@ -301,9 +317,35 @@ a:hover { text-decoration: underline; }
 /* Toast */
 .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; font-size: 14px; z-index: 200; transform: translateY(100px); opacity: 0; transition: all 0.3s; }
 .toast.show { transform: translateY(0); opacity: 1; }
+
+/* Global load banner */
+.load-banner { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); width: min(980px, calc(100vw - 28px)); background: rgba(248,81,73,0.14); border: 1px solid rgba(248,81,73,0.55); border-radius: 10px; padding: 12px 14px; z-index: 260; display: none; backdrop-filter: blur(2px); }
+.load-banner.show { display: block; }
+.load-banner-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.load-banner-title { font-size: 13px; font-weight: 600; color: #ffd4d1; }
+.load-banner-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.load-banner-list { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; }
+.load-banner-list.collapsed { display: none; }
+.load-banner-toggle { background: transparent; border: 1px solid rgba(255,212,209,0.45); color: #ffd4d1; border-radius: 6px; font-size: 11px; padding: 4px 8px; cursor: pointer; }
+.load-banner-toggle:hover { background: rgba(255,212,209,0.12); }
+.load-banner-item { font-size: 12px; color: #ffd4d1; background: rgba(13,17,23,0.45); border: 1px solid rgba(248,81,73,0.35); border-radius: 999px; padding: 5px 9px; display: inline-flex; align-items: center; gap: 8px; }
+.load-banner-item button { background: transparent; border: 1px solid rgba(255,212,209,0.45); color: #ffd4d1; border-radius: 999px; font-size: 11px; padding: 2px 8px; cursor: pointer; }
+.load-banner-item button:hover { background: rgba(255,212,209,0.12); }
 </style>
 </head>
 <body>
+<div class="load-banner" id="load-banner">
+  <div class="load-banner-header">
+    <div class="load-banner-title" id="load-banner-title">Some data failed to load.</div>
+    <div class="load-banner-actions">
+      <button class="load-banner-toggle" id="load-banner-toggle" onclick="toggleLoadBannerDetails()">Show Details</button>
+      <button class="btn btn-sm" onclick="retryAllFailedLoads()">Retry All</button>
+      <button class="btn btn-sm" onclick="dismissLoadBanner()">Dismiss</button>
+    </div>
+  </div>
+  <div class="load-banner-list collapsed" id="load-banner-list"></div>
+</div>
+
 <div class="app">
   <nav class="sidebar" id="sidebar">
     <h1>Life Optimization <span>Dashboard</span></h1>
@@ -332,6 +374,9 @@ let skincareRoutines = [];
 let lifeAreas = [];
 let sidebarSections = [];
 let currentPage = 'dashboard';
+let loadFailures = {};
+const loadBannerPrefKey = 'lifeopt_load_banner_expanded';
+let loadBannerExpanded = localStorage.getItem(loadBannerPrefKey) === '1';
 
 // ── API helpers ──
 async function api(url, opts = {}) {
@@ -339,8 +384,135 @@ async function api(url, opts = {}) {
     opts.headers = { 'Content-Type': 'application/json', ...opts.headers };
     opts.body = JSON.stringify(opts.body);
   }
-  const res = await fetch('/api/' + url, opts);
-  return res.json();
+  try {
+    const res = await fetch('/api/' + url, opts);
+    const contentType = res.headers.get('content-type') || '';
+    let data = {};
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    }
+    if (!res.ok) {
+      if (!data || typeof data !== 'object') data = {};
+      if (!data.error) data.error = `Request failed (${res.status})`;
+      data.status = res.status;
+      return data;
+    }
+    return data;
+  } catch (err) {
+    return { error: `Network error: ${err.message || 'request failed'}` };
+  }
+}
+
+function apiHasError(res) {
+  return !!(res && typeof res === 'object' && res.error);
+}
+
+function showApiError(res) {
+  if (apiHasError(res)) {
+    toast(res.error);
+    return true;
+  }
+  return false;
+}
+
+async function getList(url, label, options = {}) {
+  const { toastOnError = false } = options;
+  const res = await api(url);
+  if (apiHasError(res)) {
+    setLoadFailure(url, label, res.error);
+    if (toastOnError) toast(`${label}: ${res.error}`);
+    return [];
+  }
+  clearLoadFailure(url);
+  return Array.isArray(res) ? res : [];
+}
+
+function renderLoadBanner() {
+  const banner = document.getElementById('load-banner');
+  const title = document.getElementById('load-banner-title');
+  const list = document.getElementById('load-banner-list');
+  const toggle = document.getElementById('load-banner-toggle');
+  if (!banner || !title || !list || !toggle) return;
+
+  const entries = Object.values(loadFailures);
+  if (entries.length === 0) {
+    banner.classList.remove('show');
+    list.innerHTML = '';
+    list.classList.add('collapsed');
+    toggle.textContent = 'Show Details';
+    loadBannerExpanded = false;
+    return;
+  }
+
+  title.textContent = entries.length === 1
+    ? '1 data source failed to load.'
+    : `${entries.length} data sources failed to load.`;
+  list.innerHTML = entries.map(entry =>
+    `<div class="load-banner-item">${esc(entry.label)}<button onclick="retryFailedLoad('${esc(entry.url)}')">Retry</button></div>`
+  ).join('');
+  if (loadBannerExpanded) {
+    list.classList.remove('collapsed');
+    toggle.textContent = 'Hide Details';
+  } else {
+    list.classList.add('collapsed');
+    toggle.textContent = 'Show Details';
+  }
+  banner.classList.add('show');
+}
+
+function toggleLoadBannerDetails() {
+  loadBannerExpanded = !loadBannerExpanded;
+  localStorage.setItem(loadBannerPrefKey, loadBannerExpanded ? '1' : '0');
+  renderLoadBanner();
+}
+
+function setLoadFailure(url, label, error) {
+  loadFailures[url] = { url, label, error };
+  renderLoadBanner();
+}
+
+function clearLoadFailure(url) {
+  if (loadFailures[url]) {
+    delete loadFailures[url];
+    renderLoadBanner();
+  }
+}
+
+function dismissLoadBanner() {
+  loadFailures = {};
+  loadBannerExpanded = false;
+  renderLoadBanner();
+}
+
+async function refreshCoreData() {
+  [statuses, fashionCategories, skincareRoutines, lifeAreas, sidebarSections] = await Promise.all([
+    getList('statuses', 'Failed to load statuses', { toastOnError: false }),
+    getList('fashion/categories', 'Failed to load fashion categories', { toastOnError: false }),
+    getList('skincare/routines', 'Failed to load skincare routines', { toastOnError: false }),
+    getList('life-areas', 'Failed to load life areas', { toastOnError: false }),
+    getList('sidebar', 'Failed to load sidebar', { toastOnError: false })
+  ]);
+  if (sidebarSections.length === 0) {
+    sidebarSections = [{ id: 0, group_name: 'Overview', label: 'Dashboard', page_key: 'dashboard', is_schedule: 0 }];
+  }
+  buildSidebar();
+}
+
+async function retryFailedLoad(url) {
+  const entry = loadFailures[url];
+  if (!entry) return;
+  await getList(url, entry.label, { toastOnError: true });
+  await refreshCoreData();
+  await loadPage(currentPage);
+}
+
+async function retryAllFailedLoads() {
+  const failures = Object.values(loadFailures);
+  for (const entry of failures) {
+    await getList(entry.url, entry.label, { toastOnError: true });
+  }
+  await refreshCoreData();
+  await loadPage(currentPage);
 }
 
 function toast(msg) {
@@ -418,11 +590,14 @@ function buildSidebar() {
       const removeBtn = s.page_key === 'dashboard' ? '' :
         `<span class="nav-remove" onclick="event.stopPropagation(); removeSidebarSection(${s.id}, '${esc(s.label)}', '${esc(s.page_key)}')" title="Remove">✕</span>`;
       const scheduleIcon = s.is_schedule ? '<span class="nav-schedule-icon" title="Schedule">📅</span>' : '';
+      const hasLongTerm = Number(s.is_long_term_section || 0) === 1 || Number(s.long_term_count || 0) > 0;
+      const longTermIcon = hasLongTerm ? '<span class="nav-lto-icon" title="Long-term objectives">🎯</span>' : '';
       const scheduleToggle = s.page_key === 'dashboard' ? '' :
         `<span class="nav-schedule-toggle" onclick="event.stopPropagation(); toggleSchedule(${s.id})" title="${s.is_schedule ? 'Unmark as schedule' : 'Mark as schedule'}">${s.is_schedule ? '📅' : '🗓'}</span>`;
       html += `<div class="nav-item ${s.page_key === currentPage ? 'active' : ''}" data-page="${esc(s.page_key)}" data-id="${s.id}" draggable="true" onclick="navigateTo('${esc(s.page_key)}')" ondragstart="onSidebarDragStart(event)" ondragover="onSidebarDragOver(event)" ondrop="onSidebarDrop(event)" ondragend="onSidebarDragEnd(event)">
         <span class="nav-drag" title="Drag to reorder">⠿</span>
         ${scheduleIcon}
+        ${longTermIcon}
         <span class="nav-label">${esc(s.label)}</span>
         ${scheduleToggle}
         ${removeBtn}
@@ -482,8 +657,9 @@ function onSidebarDragEnd(e) {
 }
 
 async function saveSidebarOrder(order) {
-  await api('sidebar/reorder', { method: 'PUT', body: { order } });
-  sidebarSections = await api('sidebar');
+  const res = await api('sidebar/reorder', { method: 'PUT', body: { order } });
+  if (showApiError(res)) return;
+  sidebarSections = await getList('sidebar', 'Failed to refresh sidebar');
   buildSidebar();
 }
 
@@ -524,6 +700,14 @@ function openAddSectionModal() {
         <label>Section Name</label>
         <input name="label" placeholder="e.g. Supplements, Budget..." required>
       </div>
+      <div class="form-group">
+        <label>Section Type</label>
+        <select name="section_type">
+          <option value="default">Default</option>
+          <option value="schedule">Schedule</option>
+          <option value="long_term_objective">Long-Term Objective</option>
+        </select>
+      </div>
     </form>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal()">Cancel</button>
@@ -539,6 +723,14 @@ function openAddItemToGroupModal(groupName) {
       <div class="form-group">
         <label>Section Name</label>
         <input name="label" placeholder="e.g. Supplements, Budget..." required>
+      </div>
+      <div class="form-group">
+        <label>Section Type</label>
+        <select name="section_type">
+          <option value="default">Default</option>
+          <option value="schedule">Schedule</option>
+          <option value="long_term_objective">Long-Term Objective</option>
+        </select>
       </div>
     </form>
     <div class="modal-actions">
@@ -560,20 +752,22 @@ async function saveSection() {
     if (!group || !group.trim()) { toast('Enter a group name'); return; }
   }
   if (!data.label || !data.label.trim()) { toast('Enter a section name'); return; }
-  const res = await api('sidebar', { method: 'POST', body: { group_name: group.trim(), label: data.label.trim() } });
-  if (res.error) { toast(res.error); return; }
+  const sectionType = data.section_type || 'default';
+  const res = await api('sidebar', { method: 'POST', body: { group_name: group.trim(), label: data.label.trim(), section_type: sectionType } });
+  if (showApiError(res)) return;
   closeModal();
   toast('Section added');
-  sidebarSections = await api('sidebar');
+  sidebarSections = await getList('sidebar', 'Failed to refresh sidebar');
   buildSidebar();
   navigateTo(res.page_key);
 }
 
 async function removeSidebarSection(id, label, pageKey) {
   if (!confirm('Remove "' + label + '" from the sidebar?')) return;
-  await api('sidebar/' + id, { method: 'DELETE' });
+  const res = await api('sidebar/' + id, { method: 'DELETE' });
+  if (showApiError(res)) return;
   toast('"' + label + '" removed');
-  sidebarSections = await api('sidebar');
+  sidebarSections = await getList('sidebar', 'Failed to refresh sidebar');
   if (currentPage === pageKey) {
     currentPage = 'dashboard';
   }
@@ -583,8 +777,8 @@ async function removeSidebarSection(id, label, pageKey) {
 
 async function toggleSchedule(id) {
   const res = await api('sidebar/' + id + '/toggle-schedule', { method: 'PUT' });
-  if (res.error) { toast(res.error); return; }
-  sidebarSections = await api('sidebar');
+  if (showApiError(res)) return;
+  sidebarSections = await getList('sidebar', 'Failed to refresh sidebar');
   buildSidebar();
   toast(res.is_schedule ? 'Marked as schedule' : 'Unmarked as schedule');
 }
@@ -593,7 +787,8 @@ async function toggleSchedule(id) {
 async function renderCustomSection(c, sectionKey) {
   const section = sidebarSections.find(s => s.page_key === sectionKey);
   const label = section ? section.label : sectionKey;
-  const items = await api('custom/' + sectionKey);
+  const items = await getList('custom/' + sectionKey, 'Failed to load custom items');
+  const isLongTermPage = section ? Number(section.is_long_term_section || 0) === 1 : sectionKey === 'custom_financial_theory';
 
   // Group items by section headers (names starting with ━━━)
   const groups = [];
@@ -615,8 +810,37 @@ async function renderCustomSection(c, sectionKey) {
 
   function renderItem(it, sKey) {
     const taskBadge = it.is_task ? (it.is_quick_objective ? `<span class="task-badge qo-badge">QO</span>` : `<span class="task-badge">Task</span>`) : '';
+    const longTermBadge = it.is_long_term_objective ? `<span class="task-badge lto-badge">LTO</span>` : '';
     const taskInfo = it.is_task ? `<div class="task-schedule">${it.is_quick_objective ? '<em>anytime</em>' : esc(it.task_time || '')}${it.task_count ? ` · ${it.task_count}×` : ''}${it.task_interval ? ` ${esc(it.task_interval)}` : ''}${it.subgroup ? ` · ${esc(it.subgroup)}` : ''}</div>` : '';
     const optimizeBtn = (it.is_task && !it.is_quick_objective) ? `<button class="btn-icon" onclick="event.stopPropagation(); optimizeTask('${esc(sKey)}', ${it.id})" title="Optimize within schedule">⏱</button>` : '';
+    const isDone = Number(it.objective_completed || 0) === 1;
+    const completeBtn = `<button class="btn btn-sm ${isDone ? '' : 'btn-primary'}" onclick="toggleObjectiveComplete('${esc(sKey)}', ${it.id}, ${isDone ? 1 : 0})">${isDone ? 'Undo Complete' : 'Complete Objective'}</button>`;
+
+    if (isLongTermPage && Number(it.is_long_term_objective || 0) === 1) {
+      return `<li class="custom-item lto-item ${isDone ? 'lto-done' : ''}" draggable="true" data-item-id="${it.id}"
+        ondragstart="onItemDragStart(event, ${it.id})"
+        ondragover="onItemDragOver(event)"
+        ondrop="onItemDrop(event, '${esc(sKey)}', ${it.id})"
+        ondragend="onItemDragEnd(event)">
+        <div class="lto-marker">
+          <span class="lto-dot"></span>
+          <span class="lto-line"></span>
+        </div>
+        <div class="lto-card">
+          <div class="lto-head">
+            ${statusDot(it.status_color)}
+            <span class="item-name lto-name">${esc(it.name)} ${longTermBadge}${taskBadge}</span>
+            ${it.link ? `<a href="${esc(it.link)}" target="_blank" class="item-link">Link</a>` : ''}
+            ${completeBtn}
+            <button class="btn-icon" onclick="openCustomItemModal('${esc(sKey)}', ${it.id})">✎</button>
+            <button class="btn-icon btn-danger" onclick="deleteCustomItem('${esc(sKey)}', ${it.id})">✕</button>
+          </div>
+          ${taskInfo}
+          ${it.notes ? `<div class="lto-notes">${esc(it.notes).replace(/\n/g, '<br>')}</div>` : ''}
+        </div>
+      </li>`;
+    }
+
     return `<li class="custom-item" draggable="true" data-item-id="${it.id}"
       ondragstart="onItemDragStart(event, ${it.id})"
       ondragover="onItemDragOver(event)"
@@ -625,7 +849,7 @@ async function renderCustomSection(c, sectionKey) {
       <div class="item-row">
         <span class="drag-handle-item" title="Drag to reorder">⠿</span>
         ${statusDot(it.status_color)}
-        <span class="item-name">${esc(it.name)} ${taskBadge}</span>
+        <span class="item-name">${esc(it.name)} ${longTermBadge}${taskBadge}</span>
         ${it.link ? `<a href="${esc(it.link)}" target="_blank" class="item-link">Link</a>` : ''}
         <div class="item-actions">
           ${optimizeBtn}
@@ -639,30 +863,36 @@ async function renderCustomSection(c, sectionKey) {
   }
 
   const hasGroups = groups.some(g => g.header);
+  const totalObjectives = items.filter(it => !it.name.startsWith('━━━') && it.is_long_term_objective).length;
+  const completedObjectives = items.filter(it => !it.name.startsWith('━━━') && it.is_long_term_objective && Number(it.objective_completed || 0) === 1).length;
+  const addLabel = isLongTermPage ? '+ Add Long-Term Objective' : '+ Add Item';
+  const titleText = isLongTermPage ? `${label} · Long-Term Objectives` : label;
 
   c.innerHTML = `
     <div class="page-header">
-      <h2>${esc(label)}</h2>
-      <button class="btn btn-primary" onclick="openCustomItemModal('${esc(sectionKey)}')">+ Add Item</button>
+      <h2>${esc(titleText)}</h2>
+      <button class="btn btn-primary" onclick="openCustomItemModal('${esc(sectionKey)}')">${addLabel}</button>
     </div>
+    ${isLongTermPage ? `<div class="card-subtitle" style="margin-bottom:14px">${totalObjectives} long-term objectives tracked in this roadmap. ${completedObjectives} completed.</div>` : ''}
     <div class="legend">
       <div class="legend-item">${statusDot('green')} Have / Current</div>
       <div class="legend-item">${statusDot('blue')} Next Up</div>
       <div class="legend-item">${statusDot('orange')} Eventual</div>
       <div class="legend-item">${statusDot('red')} Action Needed</div>
+      ${isLongTermPage ? `<div class="legend-item"><span class="task-badge lto-badge" style="margin-left:0">LTO</span> Long-Term Objective</div>` : ''}
     </div>
     ${hasGroups ? groups.map(g => `
       <div class="card">
-        ${g.header ? `<h3>${esc(g.header.name.replace(/━/g, '').trim())}</h3>
+        ${g.header ? `<h3>${isLongTermPage ? 'Long-Term Objectives: ' : ''}${esc(g.header.name.replace(/━/g, '').trim())}</h3>
         ${g.header.notes ? `<div class="card-subtitle">${esc(g.header.notes)}</div>` : ''}` : ''}
-        <ul class="item-list">
+        <ul class="item-list ${isLongTermPage ? 'lto-timeline' : ''}">
           ${g.items.map(it => renderItem(it, sectionKey)).join('')}
           ${g.items.length === 0 && !g.header ? '<li class="item-row" style="color:var(--text-muted)">No items</li>' : ''}
         </ul>
       </div>
     `).join('') : `
       <div class="card">
-        <ul class="item-list">
+        <ul class="item-list ${isLongTermPage ? 'lto-timeline' : ''}">
           ${items.map(it => renderItem(it, sectionKey)).join('')}
         </ul>
         ${items.length === 0 ? '<div class="empty-state">No items yet. Click + to add one.</div>' : ''}
@@ -670,16 +900,21 @@ async function renderCustomSection(c, sectionKey) {
 }
 
 async function openCustomItemModal(sectionKey, editId) {
-  let item = { status_id: 1, name: '', link: '', notes: '', sort_order: 0, is_task: 0, task_time: '', task_count: '', task_interval: '', subgroup: '', is_quick_objective: 0 };
+  const section = sidebarSections.find(s => s.page_key === sectionKey);
+  const isLongTermPage = section ? Number(section.is_long_term_section || 0) === 1 : sectionKey === 'custom_financial_theory';
+  let item = { status_id: 1, name: '', link: '', notes: '', sort_order: 0, is_task: 0, task_time: '', task_count: '', task_interval: '', subgroup: '', is_quick_objective: 0, is_long_term_objective: isLongTermPage ? 1 : 0 };
   if (editId) {
-    const items = await api('custom/' + sectionKey);
+    const items = await getList('custom/' + sectionKey, 'Failed to load custom items', { toastOnError: false });
     item = items.find(i => i.id === editId) || item;
+    if (item.is_long_term_objective === undefined || item.is_long_term_objective === null) {
+      item.is_long_term_objective = isLongTermPage ? 1 : 0;
+    }
   }
   // Collect existing subgroups for autocomplete
-  const allItems = editId ? await api('custom/' + sectionKey) : [];
+  const allItems = editId ? await getList('custom/' + sectionKey, 'Failed to load custom items', { toastOnError: false }) : [];
   const existingSubgroups = [...new Set(allItems.map(i => i.subgroup).filter(Boolean))];
   openModal(`
-    <h3>${editId ? 'Edit' : 'Add'} Item</h3>
+    <h3>${editId ? 'Edit' : 'Add'} ${isLongTermPage ? 'Long-Term Objective' : 'Item'}</h3>
     <form id="custom-form">
       <div class="form-row">
         <div class="form-group"><label>Name</label><input name="name" value="${esc(item.name || '')}" required></div>
@@ -687,6 +922,9 @@ async function openCustomItemModal(sectionKey, editId) {
       </div>
       <div class="form-group"><label>Link</label><input name="link" value="${esc(item.link || '')}"></div>
       <div class="form-group"><label>Notes</label><textarea name="notes">${esc(item.notes || '')}</textarea></div>
+      <div class="form-group">
+        <label><input type="checkbox" id="is-lto-check" name="is_long_term_objective" value="1" ${item.is_long_term_objective ? 'checked' : ''}> Mark as long-term objective</label>
+      </div>
       <div class="form-row">
         <div class="form-group"><label>Sort Order</label><input type="number" name="sort_order" value="${item.sort_order || 0}"></div>
         <div class="form-group"><label>Subgroup</label><input name="subgroup" value="${esc(item.subgroup || '')}" placeholder="e.g. Morning, Afternoon, Evening" list="subgroup-list"><datalist id="subgroup-list">${existingSubgroups.map(s => `<option value="${esc(s)}">`).join('')}</datalist></div>
@@ -740,6 +978,8 @@ async function saveCustomItem(sectionKey, id) {
   const data = getFormData('custom-form');
   data.status_id = Number(data.status_id);
   data.sort_order = Number(data.sort_order) || 0;
+  const isLTOCheck = document.getElementById('is-lto-check');
+  data.is_long_term_objective = (isLTOCheck && isLTOCheck.checked) ? 1 : 0;
   const isTaskCheck = document.getElementById('is-task-check');
   data.is_task = isTaskCheck && isTaskCheck.checked ? 1 : 0;
   const isQOCheck = document.getElementById('is-qo-check');
@@ -755,8 +995,10 @@ async function saveCustomItem(sectionKey, id) {
     data.task_interval = data.task_interval || null;
   }
   data.subgroup = data.subgroup || null;
-  if (id) await api('custom/' + sectionKey + '/' + id, { method: 'PUT', body: data });
-  else await api('custom/' + sectionKey, { method: 'POST', body: data });
+  let res;
+  if (id) res = await api('custom/' + sectionKey + '/' + id, { method: 'PUT', body: data });
+  else res = await api('custom/' + sectionKey, { method: 'POST', body: data });
+  if (showApiError(res)) return;
   closeModal();
   toast(id ? 'Item updated' : 'Item added');
   loadPage(sectionKey);
@@ -764,8 +1006,20 @@ async function saveCustomItem(sectionKey, id) {
 
 async function deleteCustomItem(sectionKey, id) {
   if (!confirm('Delete this item?')) return;
-  await api('custom/' + sectionKey + '/' + id, { method: 'DELETE' });
+  const res = await api('custom/' + sectionKey + '/' + id, { method: 'DELETE' });
+  if (showApiError(res)) return;
   toast('Item deleted');
+  loadPage(sectionKey);
+}
+
+async function toggleObjectiveComplete(sectionKey, id, currentlyCompleted) {
+  const nextVal = currentlyCompleted ? 0 : 1;
+  const res = await api('custom/' + sectionKey + '/' + id + '/complete', {
+    method: 'PUT',
+    body: { is_completed: nextVal }
+  });
+  if (showApiError(res)) return;
+  toast(nextVal ? 'Objective completed' : 'Objective marked incomplete');
   loadPage(sectionKey);
 }
 
@@ -804,20 +1058,21 @@ async function onItemDrop(e, sectionKey, targetId) {
   ids.splice(fromIdx, 1);
   ids.splice(toIdx, 0, dragItemId);
   onItemDragEnd(e);
-  await api('custom/' + sectionKey + '/reorder', { method: 'PUT', body: { order: ids } });
+  const res = await api('custom/' + sectionKey + '/reorder', { method: 'PUT', body: { order: ids } });
+  if (showApiError(res)) return;
   loadPage(currentPage);
 }
 
 async function optimizeTask(sectionKey, id) {
   const res = await api('custom/' + sectionKey + '/' + id + '/optimize', { method: 'PUT' });
-  if (res.error) { toast(res.error); return; }
+  if (showApiError(res)) return;
   toast('Placed at ' + res.task_time + ' (' + res.subgroup + ')');
   loadPage(currentPage);
 }
 
 async function optimizeTaskFromModal(sectionKey, id) {
   const res = await api('custom/' + sectionKey + '/' + id + '/optimize', { method: 'PUT' });
-  if (res.error) { toast(res.error); return; }
+  if (showApiError(res)) return;
   toast('Placed at ' + res.task_time + ' (' + res.subgroup + ')');
   closeModal();
   loadPage(currentPage);
@@ -826,7 +1081,11 @@ async function optimizeTaskFromModal(sectionKey, id) {
 // ── Dashboard ──
 async function renderDashboard(c) {
   const [fashion, skincare, pharma, goals, purchases] = await Promise.all([
-    api('fashion'), api('skincare'), api('pharmacology'), api('goals'), api('purchases')
+    getList('fashion', 'Failed to load fashion'),
+    getList('skincare', 'Failed to load skincare'),
+    getList('pharmacology', 'Failed to load pharmacology'),
+    getList('goals', 'Failed to load goals'),
+    getList('purchases', 'Failed to load purchases')
   ]);
   const owned = purchases.filter(p => p.status_color === 'green').length;
   const toBuy = purchases.filter(p => p.status_color === 'blue').length;
@@ -871,7 +1130,7 @@ async function renderDashboard(c) {
 
 // ── All Purchases ──
 async function renderPurchases(c) {
-  const items = await api('purchases');
+  const items = await getList('purchases', 'Failed to load purchases');
   c.innerHTML = `
     <div class="page-header"><h2>All Purchases</h2></div>
     <div class="legend">
@@ -898,7 +1157,7 @@ async function renderPurchases(c) {
 
 // ── Fashion ──
 async function renderFashion(c) {
-  const items = await api('fashion');
+  const items = await getList('fashion', 'Failed to load fashion');
   const grouped = {};
   fashionCategories.forEach(cat => grouped[cat.name] = []);
   items.forEach(it => {
@@ -942,7 +1201,7 @@ async function renderFashion(c) {
 async function openFashionModal(editId) {
   let item = { category_id: fashionCategories[0]?.id, status_id: 1, name: '', link: '', rep_link: '', notes: '' };
   if (editId) {
-    const items = await api('fashion');
+    const items = await getList('fashion', 'Failed to load fashion', { toastOnError: false });
     item = items.find(i => i.id === editId) || item;
   }
   openModal(`
@@ -977,8 +1236,13 @@ async function saveFashion(id) {
   const data = getFormData('fashion-form');
   data.category_id = Number(data.category_id);
   data.status_id = Number(data.status_id);
-  if (id) await api(`fashion/${id}`, { method: 'PUT', body: data });
-  else await api('fashion', { method: 'POST', body: data });
+  let res;
+  if (id) res = await api(`fashion/${id}`, { method: 'PUT', body: data });
+  else res = await api('fashion', { method: 'POST', body: data });
+  if (res && res.error) {
+    toast(res.error);
+    return;
+  }
   closeModal();
   toast(id ? 'Item updated' : 'Item added');
   loadPage('fashion');
@@ -986,14 +1250,18 @@ async function saveFashion(id) {
 
 async function deleteFashion(id) {
   if (!confirm('Delete this item?')) return;
-  await api(`fashion/${id}`, { method: 'DELETE' });
+  const res = await api(`fashion/${id}`, { method: 'DELETE' });
+  if (res && res.error) {
+    toast(res.error);
+    return;
+  }
   toast('Item deleted');
   loadPage('fashion');
 }
 
 // ── Skincare ──
 async function renderSkincare(c) {
-  const items = await api('skincare');
+  const items = await getList('skincare', 'Failed to load skincare');
   const routineItems = {};
   skincareRoutines.forEach(r => routineItems[r.id] = { id: r.id, name: r.name, products: [] });
   const wanted = [];
@@ -1061,7 +1329,7 @@ async function renderSkincare(c) {
 async function openSkincareModal(editId) {
   let item = { routine_id: skincareRoutines[0]?.id, status_id: 1, name: '', step_order: 0, is_wanted: 0, link: '', notes: '' };
   if (editId) {
-    const items = await api('skincare');
+    const items = await getList('skincare', 'Failed to load skincare', { toastOnError: false });
     item = items.find(i => i.id === editId) || item;
   }
   openModal(`
@@ -1114,9 +1382,9 @@ async function saveSkincare(id) {
     const rname = data.new_routine_name;
     if (!rname || !rname.trim()) { toast('Enter a routine name'); return; }
     const res = await api('skincare/routines', { method: 'POST', body: { name: rname.trim() } });
-    if (res.error) { toast(res.error); return; }
+    if (showApiError(res)) return;
     data.routine_id = res.id;
-    skincareRoutines = await api('skincare/routines');
+    skincareRoutines = await getList('skincare/routines', 'Failed to refresh routines');
   } else {
     data.routine_id = data.routine_id ? Number(data.routine_id) : null;
   }
@@ -1124,8 +1392,10 @@ async function saveSkincare(id) {
   data.status_id = Number(data.status_id);
   data.step_order = Number(data.step_order) || 0;
   data.is_wanted = Number(data.is_wanted) || 0;
-  if (id) await api(`skincare/${id}`, { method: 'PUT', body: data });
-  else await api('skincare', { method: 'POST', body: data });
+  let res;
+  if (id) res = await api(`skincare/${id}`, { method: 'PUT', body: data });
+  else res = await api('skincare', { method: 'POST', body: data });
+  if (showApiError(res)) return;
   closeModal();
   toast(id ? 'Product updated' : 'Product added');
   loadPage('skincare');
@@ -1133,7 +1403,8 @@ async function saveSkincare(id) {
 
 async function deleteSkincare(id) {
   if (!confirm('Delete this product?')) return;
-  await api(`skincare/${id}`, { method: 'DELETE' });
+  const res = await api(`skincare/${id}`, { method: 'DELETE' });
+  if (showApiError(res)) return;
   toast('Product deleted');
   loadPage('skincare');
 }
@@ -1157,24 +1428,25 @@ async function saveNewRoutine() {
   const data = getFormData('routine-form');
   if (!data.name || !data.name.trim()) { toast('Enter a routine name'); return; }
   const res = await api('skincare/routines', { method: 'POST', body: { name: data.name.trim() } });
-  if (res.error) { toast(res.error); return; }
+  if (showApiError(res)) return;
   closeModal();
   toast('Routine added');
-  skincareRoutines = await api('skincare/routines');
+  skincareRoutines = await getList('skincare/routines', 'Failed to refresh routines');
   loadPage('skincare');
 }
 
 async function deleteRoutine(id, name) {
   if (!confirm('Remove "' + name + '" routine? Its products will move to Wanted.')) return;
-  await api('skincare/routines/' + id, { method: 'DELETE' });
+  const res = await api('skincare/routines/' + id, { method: 'DELETE' });
+  if (showApiError(res)) return;
   toast('Routine removed');
-  skincareRoutines = await api('skincare/routines');
+  skincareRoutines = await getList('skincare/routines', 'Failed to refresh routines');
   loadPage('skincare');
 }
 
 // ── Pharmacology ──
 async function renderPharmacology(c) {
-  const items = await api('pharmacology');
+  const items = await getList('pharmacology', 'Failed to load pharmacology');
   c.innerHTML = `
     <div class="page-header">
       <h2>Pharmacology</h2>
@@ -1202,7 +1474,7 @@ async function renderPharmacology(c) {
 async function openPharmaModal(editId) {
   let item = { status_id: 1, name: '', dosage: '', frequency: '', link: '', notes: '' };
   if (editId) {
-    const items = await api('pharmacology');
+    const items = await getList('pharmacology', 'Failed to load pharmacology', { toastOnError: false });
     item = items.find(i => i.id === editId) || item;
   }
   openModal(`
@@ -1228,8 +1500,10 @@ async function openPharmaModal(editId) {
 async function savePharma(id) {
   const data = getFormData('pharma-form');
   data.status_id = Number(data.status_id);
-  if (id) await api(`pharmacology/${id}`, { method: 'PUT', body: data });
-  else await api('pharmacology', { method: 'POST', body: data });
+  let res;
+  if (id) res = await api(`pharmacology/${id}`, { method: 'PUT', body: data });
+  else res = await api('pharmacology', { method: 'POST', body: data });
+  if (showApiError(res)) return;
   closeModal();
   toast(id ? 'Item updated' : 'Item added');
   loadPage('pharmacology');
@@ -1237,14 +1511,15 @@ async function savePharma(id) {
 
 async function deletePharma(id) {
   if (!confirm('Delete this item?')) return;
-  await api(`pharmacology/${id}`, { method: 'DELETE' });
+  const res = await api(`pharmacology/${id}`, { method: 'DELETE' });
+  if (showApiError(res)) return;
   toast('Item deleted');
   loadPage('pharmacology');
 }
 
 // ── Goals ──
 async function renderGoals(c) {
-  const goals = await api('goals');
+  const goals = await getList('goals', 'Failed to load goals');
   const grouped = {};
   lifeAreas.forEach(a => grouped[a.name] = []);
   goals.forEach(g => {
@@ -1286,7 +1561,7 @@ async function renderGoals(c) {
 async function openGoalModal(editId) {
   let item = { life_area_id: lifeAreas[0]?.id, title: '', description: '', target_date: '', priority: 0 };
   if (editId) {
-    const goals = await api('goals');
+    const goals = await getList('goals', 'Failed to load goals', { toastOnError: false });
     item = goals.find(g => g.id === editId) || item;
   }
   openModal(`
@@ -1322,25 +1597,29 @@ async function saveGoal(id) {
   const data = getFormData('goal-form');
   data.life_area_id = Number(data.life_area_id);
   data.priority = Number(data.priority);
-  if (id) await api(`goals/${id}`, { method: 'PUT', body: data });
-  else await api('goals', { method: 'POST', body: data });
+  let res;
+  if (id) res = await api(`goals/${id}`, { method: 'PUT', body: data });
+  else res = await api('goals', { method: 'POST', body: data });
+  if (showApiError(res)) return;
   closeModal();
   toast(id ? 'Goal updated' : 'Goal added');
   loadPage('goals');
 }
 
 async function toggleGoal(id, completed) {
-  const goals = await api('goals');
+  const goals = await getList('goals', 'Failed to load goals', { toastOnError: false });
   const goal = goals.find(g => g.id === id);
   if (!goal) return;
   goal.is_completed = completed;
-  await api(`goals/${id}`, { method: 'PUT', body: goal });
+  const res = await api(`goals/${id}`, { method: 'PUT', body: goal });
+  if (showApiError(res)) return;
   loadPage('goals');
 }
 
 async function deleteGoal(id) {
   if (!confirm('Delete this goal?')) return;
-  await api(`goals/${id}`, { method: 'DELETE' });
+  const res = await api(`goals/${id}`, { method: 'DELETE' });
+  if (showApiError(res)) return;
   toast('Goal deleted');
   loadPage('goals');
 }
@@ -1543,7 +1822,7 @@ function toggleWeekTask(dayIdx, taskId, checked) {
 }
 
 async function renderSchedule(c) {
-  const tasks = await api('schedule');
+  const tasks = await getList('schedule', 'Failed to load schedule');
   const scheduleSections = sidebarSections.filter(s => s.is_schedule);
 
   const intervals = [
@@ -1883,14 +2162,7 @@ async function renderSchedule(c) {
 
 // ── Init ──
 async function init() {
-  [statuses, fashionCategories, skincareRoutines, lifeAreas, sidebarSections] = await Promise.all([
-    api('statuses'),
-    api('fashion/categories'),
-    api('skincare/routines'),
-    api('life-areas'),
-    api('sidebar')
-  ]);
-  buildSidebar();
+  await refreshCoreData();
   loadPage('dashboard');
 }
 
