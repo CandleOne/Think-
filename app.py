@@ -1981,33 +1981,9 @@ def set_custom_objective_completed(section_key, item_id):
         if not item:
             return api_error('Custom item not found', 404)
 
-        # Lock progression for long-term objectives: you cannot complete a later objective
-        # until all prior objectives in the same phase are completed.
+        # Lock progression for long-term objectives: you cannot complete an objective
+        # until ALL prior objectives across ALL phases are completed.
         if is_completed and int(item['is_long_term_objective'] or 0) == 1:
-            prev_header = db.execute(
-                '''
-                SELECT sort_order
-                FROM custom_items
-                WHERE section_key=? AND name LIKE '━━━%' AND sort_order < ?
-                ORDER BY sort_order DESC
-                LIMIT 1
-                ''',
-                (section_key, item['sort_order'])
-            ).fetchone()
-            next_header = db.execute(
-                '''
-                SELECT sort_order
-                FROM custom_items
-                WHERE section_key=? AND name LIKE '━━━%' AND sort_order > ?
-                ORDER BY sort_order ASC
-                LIMIT 1
-                ''',
-                (section_key, item['sort_order'])
-            ).fetchone()
-
-            lower_bound = int(prev_header['sort_order']) if prev_header else -1
-            upper_bound = int(next_header['sort_order']) if next_header else 10**9
-
             blocking = db.execute(
                 '''
                 SELECT id, name
@@ -2015,14 +1991,12 @@ def set_custom_objective_completed(section_key, item_id):
                 WHERE section_key=?
                   AND COALESCE(is_long_term_objective, 0) = 1
                   AND name NOT LIKE '━━━%'
-                  AND sort_order > ?
-                  AND sort_order < ?
                   AND sort_order < ?
                   AND COALESCE(objective_completed, 0) = 0
                 ORDER BY sort_order ASC, id ASC
                 LIMIT 1
                 ''',
-                (section_key, lower_bound, upper_bound, item['sort_order'])
+                (section_key, item['sort_order'])
             ).fetchone()
 
             if blocking:

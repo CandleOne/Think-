@@ -1052,8 +1052,11 @@ async function renderCustomSection(c, sectionKey) {
   const ltoLockedById = {};
   const ltoLockReasonById = {};
   if (isLongTermPage) {
+    // Track the first incomplete objective across ALL groups/phases,
+    // not just within each phase. This ensures later phases stay locked
+    // until all prior phases are fully completed.
+    let firstIncompleteName = null;
     groups.forEach(g => {
-      let firstIncompleteName = null;
       g.items.forEach(it => {
         if (Number(it.is_long_term_objective || 0) !== 1) return;
         const done = Number(it.objective_completed || 0) === 1;
