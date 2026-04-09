@@ -193,6 +193,16 @@ a:hover { text-decoration: underline; }
 .filter-chip:hover { border-color: var(--accent); color: var(--accent); }
 .filter-chip.active { background: var(--accent); color: #0d1117; border-color: var(--accent); font-weight: 600; }
 .archive-empty { color: var(--text-muted); font-size: 13px; padding: 12px 0; }
+.today-combo { display: grid; grid-template-columns: 1.15fr 1fr; gap: 16px; }
+.today-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+.today-col h4 { font-size: 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.today-meta { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+.today-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.today-stat { font-size: 11px; border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; color: var(--text-muted); background: var(--surface2); }
+.today-goal-score { font-size: 11px; color: var(--accent); font-weight: 600; }
+@media (max-width: 960px) {
+  .today-combo { grid-template-columns: 1fr; }
+}
 
 /* Custom items with notes */
 .custom-item { margin-bottom: 4px; cursor: grab; }
@@ -2081,6 +2091,31 @@ async function renderGoalArchive(c) {
     return h * 60 + mm;
   }
 
+  function estimateGoalSessionMinutes(g) {
+    const hours = Number(g.time_commitment_hours || 0);
+    if (hours > 0) return Math.max(25, Math.min(120, Math.round((hours * 60) / 20)));
+    const d = Number(g.difficulty || 0);
+    if (d >= 8) return 75;
+    if (d >= 5) return 55;
+    if (d >= 3) return 40;
+    return 30;
+  }
+
+  function goalOpportunityScore(g, today) {
+    const ai = Number(g.ai_priority_score || 0);
+    const p = Number(g.priority || 0);
+    const d = Number(g.difficulty || 0);
+    const target = (g.target_date || '').slice(0, 10);
+    let dueBoost = 0;
+    if (target) {
+      if (target < today) dueBoost = 35;
+      else if (target === today) dueBoost = 28;
+      else if (target <= new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)) dueBoost = 12;
+    }
+    const base = ai > 0 ? ai : (p * 30 + dueBoost);
+    return base - (d * 1.2);
+  }
+
   function buildPage() {
     const filtered = filterGoals(entries);
     const totalActive = entries.filter(g => !g.is_completed).length;
@@ -2097,7 +2132,12 @@ async function renderGoalArchive(c) {
           }</span>`).join('')}
       </div>`;
 
-    const todayCards = filtered
+    const now = nowInTZ();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const dayEnd = 22 * 60;
+
+    const todaySchedule = entries
+      .filter(g => g.source_type === 'custom_item' && g.item_kind === 'task' && Number(g.is_schedule_section || 0) === 1 && !g.is_completed)
       .slice()
       .sort((a, b) => {
         const ta = parse12hToMin(a.task_time);
@@ -2105,42 +2145,88 @@ async function renderGoalArchive(c) {
         if (ta !== null && tb !== null && ta !== tb) return ta - tb;
         if (ta !== null && tb === null) return -1;
         if (ta === null && tb !== null) return 1;
-        return (Number(b.priority || 0) - Number(a.priority || 0));
-      })
+        return String(a.title || '').localeCompare(String(b.title || ''));
+      });
+
+    const remainingScheduled = todaySchedule.filter(t => {
+      const tm = parse12hToMin(t.task_time);
+      return tm === null || tm >= nowMin;
+    });
+    const scheduledRemainingMinutes = remainingScheduled.length * 45;
+    const remainingWindowMinutes = Math.max(0, dayEnd - nowMin);
+    const goalBudgetMinutes = Math.max(0, Math.min(240, remainingWindowMinutes - scheduledRemainingMinutes));
+
+    const goalCandidates = entries
+      .filter(g => g.source_type === 'goal' && !g.is_completed)
       .map(g => {
-        const statusColor = g.is_completed ? 'var(--green)' : (g.priority === 2 ? 'var(--red)' : g.priority === 1 ? 'var(--orange)' : 'var(--blue)');
-        const kindLabel = g.item_kind === 'long_term_objective' ? 'Long-Term Objective' : (g.item_kind === 'task' ? 'Task' : 'Goal');
-        const sourceLabel = g.source_type === 'custom_item' ? 'Custom Section' : (g.source_type === 'task' ? 'Goal Task' : 'Goal');
-        const isEditableGoal = g.source_type === 'goal';
-        const sectionKeyArg = JSON.stringify(String(g.section_key || ''));
-        return `
-          <div class="archive-goal-card ${g.is_completed ? 'completed-card' : ''}">
-            <div class="agc-status" style="background:${statusColor}"></div>
-            <div class="agc-body">
-              <div class="agc-title ${g.is_completed ? 'done' : ''}">${esc(g.title)}</div>
-              ${g.description ? `<div class="agc-desc">${esc(g.description)}</div>` : ''}
-              <div class="agc-tags">
-                <span class="agc-tag area">${esc(g.area_name || '')}</span>
-                <span class="agc-tag">${kindLabel}</span>
-                <span class="agc-tag">${sourceLabel}</span>
-                ${g.task_time ? `<span class="agc-tag">🕒 ${esc(g.task_time)}</span>` : ''}
-                ${g.target_date ? `<span class="agc-tag date">📅 ${esc(g.target_date)}</span>` : ''}
-              </div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
-              ${isEditableGoal ? `
-                <button class="btn-icon" onclick="openGoalModal(${g.id})" title="Edit">✎</button>
-                <button class="btn-icon ${g.is_completed ? '' : 'btn-danger'}" onclick="archiveToggleGoal(${g.id},${g.is_completed ? 0 : 1})" title="${g.is_completed ? 'Reopen' : 'Complete'}">
-                  ${g.is_completed ? '↩' : '✓'}
-                </button>
-              ` : ''}
-              ${(!isEditableGoal && g.section_key) ? `
-                <button class="btn-icon" onclick='loadPage(${sectionKeyArg})' title="Open section">↗</button>
-              ` : ''}
-            </div>
-          </div>`;
+        const sessionMinutes = estimateGoalSessionMinutes(g);
+        return {
+          ...g,
+          sessionMinutes,
+          opportunityScore: goalOpportunityScore(g, todayIso),
+        };
       })
-      .join('');
+      .sort((a, b) => {
+        if (b.opportunityScore !== a.opportunityScore) return b.opportunityScore - a.opportunityScore;
+        return a.sessionMinutes - b.sessionMinutes;
+      });
+
+    const recommendedGoals = [];
+    let usedMinutes = 0;
+    for (const g of goalCandidates) {
+      if (usedMinutes + g.sessionMinutes <= goalBudgetMinutes) {
+        recommendedGoals.push(g);
+        usedMinutes += g.sessionMinutes;
+      }
+      if (recommendedGoals.length >= 4) break;
+    }
+    if (!recommendedGoals.length && goalCandidates.length) {
+      recommendedGoals.push(goalCandidates[0]);
+      usedMinutes = goalCandidates[0].sessionMinutes;
+    }
+
+    const scheduleCards = todaySchedule.map(g => {
+      const sectionKeyArg = JSON.stringify(String(g.section_key || ''));
+      return `
+        <div class="archive-goal-card ${g.is_completed ? 'completed-card' : ''}">
+          <div class="agc-status" style="background:var(--blue)"></div>
+          <div class="agc-body">
+            <div class="agc-title ${g.is_completed ? 'done' : ''}">${esc(g.title)}</div>
+            <div class="agc-tags">
+              <span class="agc-tag area">${esc(g.area_name || '')}</span>
+              ${g.task_time ? `<span class="agc-tag">🕒 ${esc(g.task_time)}</span>` : `<span class="agc-tag">Unscheduled</span>`}
+              ${g.task_interval ? `<span class="agc-tag">${esc(g.task_interval)}</span>` : ''}
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+            <button class="btn-icon" onclick='loadPage(${sectionKeyArg})' title="Open section">↗</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    const goalCards = recommendedGoals.map(g => {
+      const dueToday = g.target_date && String(g.target_date).slice(0, 10) === todayIso;
+      const overdue = g.target_date && String(g.target_date).slice(0, 10) < todayIso;
+      return `
+        <div class="archive-goal-card">
+          <div class="agc-status" style="background:var(--orange)"></div>
+          <div class="agc-body">
+            <div class="agc-title">${esc(g.title)}</div>
+            ${g.description ? `<div class="agc-desc">${esc(g.description)}</div>` : ''}
+            <div class="agc-tags">
+              <span class="agc-tag area">${esc(g.area_name || '')}</span>
+              <span class="agc-tag">~${g.sessionMinutes} min block</span>
+              <span class="agc-tag">score ${Math.round(g.opportunityScore)}</span>
+              ${g.target_date ? `<span class="agc-tag date ${overdue ? 'overdue' : ''}">📅 ${esc(g.target_date)}${dueToday ? ' (today)' : (overdue ? ' ⚠' : '')}</span>` : ''}
+            </div>
+            ${g.ai_reasoning ? `<div class="today-goal-score" style="margin-top:6px">${esc(g.ai_reasoning)}</div>` : ''}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+            <button class="btn-icon" onclick="openGoalModal(${g.id})" title="Edit">✎</button>
+            <button class="btn-icon btn-danger" onclick="archiveToggleGoal(${g.id},1)" title="Complete">✓</button>
+          </div>
+        </div>`;
+    }).join('');
 
     const sections = TERMS.map(t => {
       const termGoals = filtered.filter(g => g.term === t.key);
@@ -2205,7 +2291,31 @@ async function renderGoalArchive(c) {
       </div>
       ${filterBar}
       ${isEmpty ? '<div class="card"><div class="archive-empty">No goals match this filter.</div></div>' : (_archiveFilter === 'today'
-        ? `<div class="term-section"><div class="term-header"><span class="term-badge short">Today View</span><span class="term-subtitle">Actionable items for ${todayIso}</span><span class="term-count">${filtered.length} item${filtered.length !== 1 ? 's' : ''}</span></div>${todayCards}</div>`
+        ? `<div class="term-section">
+             <div class="term-header">
+               <span class="term-badge short">Today Plan</span>
+               <span class="term-subtitle">Blend of your schedule and best goals to tackle today</span>
+               <span class="term-count">${todayIso}</span>
+             </div>
+             <div class="today-stats">
+               <span class="today-stat">Now: ${formatLiveClock()}</span>
+               <span class="today-stat">Remaining window: ${Math.floor(remainingWindowMinutes / 60)}h ${remainingWindowMinutes % 60}m</span>
+               <span class="today-stat">Scheduled load: ${Math.floor(scheduledRemainingMinutes / 60)}h ${scheduledRemainingMinutes % 60}m</span>
+               <span class="today-stat">Goal budget: ${Math.floor(goalBudgetMinutes / 60)}h ${goalBudgetMinutes % 60}m</span>
+             </div>
+             <div class="today-combo">
+               <div class="today-col">
+                 <h4>Today's Schedule</h4>
+                 <div class="today-meta">Tasks from schedule-enabled sections${todaySchedule.length ? '' : ' (none yet)'}</div>
+                 ${todaySchedule.length ? scheduleCards : '<div class="archive-empty">No scheduled tasks for today.</div>'}
+               </div>
+               <div class="today-col">
+                 <h4>Top Goals You Can Fit Today</h4>
+                 <div class="today-meta">Recommended by priority and estimated effort within your remaining budget</div>
+                 ${recommendedGoals.length ? goalCards : '<div class="archive-empty">No goal blocks fit the remaining time today.</div>'}
+               </div>
+             </div>
+           </div>`
         : sections)}`;
   }
 

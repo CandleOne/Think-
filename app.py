@@ -757,6 +757,7 @@ def get_goals_archive():
                 ELSE 0
             END AS priority,
             COALESCE(ss.label, ci.section_key) AS area_name,
+            COALESCE(ss.is_schedule, 0) AS is_schedule_section,
             ci.task_time,
             ci.task_interval,
             ci.section_key,
@@ -781,6 +782,7 @@ def get_goals_archive():
             'source_type': 'goal',
             'item_kind': 'goal',
             'is_goal': 1,
+            'is_schedule_section': 0,
             'task_time': None,
             'task_interval': None,
             **row,
@@ -792,6 +794,7 @@ def get_goals_archive():
             'source_type': 'task',
             'item_kind': 'task',
             'is_goal': 1,
+            'is_schedule_section': 0,
             **row,
         })
 
