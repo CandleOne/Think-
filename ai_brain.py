@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from urllib.error import HTTPError
 from urllib import request as urllib_request
 
 
@@ -56,6 +57,20 @@ def get_ai_runtime_info() -> dict[str, Any]:
         "model": model,
         "configured": configured,
     }
+
+
+def _claude_model_candidates() -> list[str]:
+    candidates: list[str] = []
+    for model in [
+        os.environ.get("CLAUDE_MODEL"),
+        os.environ.get("AI_BRAIN_MODEL"),
+        "claude-sonnet-4-20250514",
+        "claude-3-5-sonnet-latest",
+    ]:
+        m = (model or "").strip()
+        if m and m not in candidates:
+            candidates.append(m)
+    return candidates
 
 
 def _parse_time_to_minutes(value: str | None) -> int | None:
@@ -194,43 +209,54 @@ def _call_claude_json(system_prompt: str, user_prompt: str) -> dict[str, Any] | 
         return None
 
     base_url = os.environ.get("CLAUDE_BASE_URL", "https://api.anthropic.com/v1").rstrip("/")
-    model = os.environ.get("CLAUDE_MODEL") or os.environ.get("AI_BRAIN_MODEL") or "claude-3-7-sonnet-latest"
-
-    payload = {
-        "model": model,
-        "max_tokens": 1800,
-        "temperature": 0.2,
-        "system": system_prompt + " Return valid JSON only.",
-        "messages": [
-            {"role": "user", "content": user_prompt},
-        ],
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": os.environ.get("ANTHROPIC_VERSION", "2023-06-01"),
     }
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib_request.Request(
-        f"{base_url}/messages",
-        data=data,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": os.environ.get("ANTHROPIC_VERSION", "2023-06-01"),
-        },
-    )
 
-    try:
-        with urllib_request.urlopen(req, timeout=45) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-            content = body.get("content") or []
-            text_parts = []
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    text_parts.append(block.get("text", ""))
-            raw = "\n".join(text_parts).strip()
-            if not raw:
-                return None
-            return json.loads(raw)
-    except Exception:
-        return None
+    for model in _claude_model_candidates():
+        payload = {
+            "model": model,
+            "max_tokens": 1800,
+            "temperature": 0.2,
+            "system": system_prompt + " Return valid JSON only.",
+            "messages": [
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib_request.Request(
+            f"{base_url}/messages",
+            data=data,
+            method="POST",
+            headers=headers,
+        )
+
+        try:
+            with urllib_request.urlopen(req, timeout=45) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+                content = body.get("content") or []
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                raw = "\n".join(text_parts).strip()
+                if not raw:
+                    return None
+                return json.loads(raw)
+        except HTTPError as err:
+            try:
+                body_text = err.read().decode("utf-8", errors="ignore")
+            except Exception:
+                body_text = ""
+            # Try next candidate when model is not found.
+            if err.code == 404 and "not_found_error" in body_text:
+                continue
+            return None
+        except Exception:
+            return None
+    return None
 
 
 def _call_ai_json(system_prompt: str, user_prompt: str) -> tuple[str, dict[str, Any] | None]:
@@ -250,13 +276,22 @@ def _call_ai_json(system_prompt: str, user_prompt: str) -> tuple[str, dict[str, 
     return "heuristic", None
 
 
-def _call_openai_text(system_prompt: str, user_prompt: str) -> str | None:
+def _sanitize_token_limit(value: Any, default: int = 700) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = default
+    return max(64, min(4096, n))
+
+
+def _call_openai_text(system_prompt: str, user_prompt: str, max_tokens: int = 700) -> str | None:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return None
 
     base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
     model = os.environ.get("OPENAI_MODEL") or os.environ.get("AI_BRAIN_MODEL") or "gpt-4o-mini"
+    max_tokens = _sanitize_token_limit(max_tokens)
 
     payload = {
         "model": model,
@@ -265,6 +300,7 @@ def _call_openai_text(system_prompt: str, user_prompt: str) -> str | None:
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.3,
+        "max_tokens": max_tokens,
     }
     data = json.dumps(payload).encode("utf-8")
     req = urllib_request.Request(
@@ -285,50 +321,62 @@ def _call_openai_text(system_prompt: str, user_prompt: str) -> str | None:
         return None
 
 
-def _call_claude_text(system_prompt: str, user_prompt: str) -> str | None:
+def _call_claude_text(system_prompt: str, user_prompt: str, max_tokens: int = 700) -> str | None:
     api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY")
     if not api_key:
         return None
 
     base_url = os.environ.get("CLAUDE_BASE_URL", "https://api.anthropic.com/v1").rstrip("/")
-    model = os.environ.get("CLAUDE_MODEL") or os.environ.get("AI_BRAIN_MODEL") or "claude-3-7-sonnet-latest"
-
-    payload = {
-        "model": model,
-        "max_tokens": 1800,
-        "temperature": 0.3,
-        "system": system_prompt,
-        "messages": [
-            {"role": "user", "content": user_prompt},
-        ],
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": os.environ.get("ANTHROPIC_VERSION", "2023-06-01"),
     }
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib_request.Request(
-        f"{base_url}/messages",
-        data=data,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": os.environ.get("ANTHROPIC_VERSION", "2023-06-01"),
-        },
-    )
 
-    try:
-        with urllib_request.urlopen(req, timeout=45) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-            content = body.get("content") or []
-            text_parts = []
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    text_parts.append(block.get("text", ""))
-            out = "\n".join(text_parts).strip()
-            return out or None
-    except Exception:
-        return None
+    max_tokens = _sanitize_token_limit(max_tokens)
+
+    for model in _claude_model_candidates():
+        payload = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": 0.3,
+            "system": system_prompt,
+            "messages": [
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib_request.Request(
+            f"{base_url}/messages",
+            data=data,
+            method="POST",
+            headers=headers,
+        )
+
+        try:
+            with urllib_request.urlopen(req, timeout=45) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+                content = body.get("content") or []
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                out = "\n".join(text_parts).strip()
+                return out or None
+        except HTTPError as err:
+            try:
+                body_text = err.read().decode("utf-8", errors="ignore")
+            except Exception:
+                body_text = ""
+            if err.code == 404 and "not_found_error" in body_text:
+                continue
+            return None
+        except Exception:
+            return None
+    return None
 
 
-def query_ai(prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+def query_ai(prompt: str, context: dict[str, Any] | None = None, token_limit: int | None = None) -> dict[str, Any]:
     context = context or {}
     clean_prompt = str(prompt or "").strip()
     if not clean_prompt:
@@ -360,16 +408,18 @@ def query_ai(prompt: str, context: dict[str, Any] | None = None) -> dict[str, An
     }
     user_prompt = json.dumps(user_payload, ensure_ascii=True)
 
+    effective_token_limit = _sanitize_token_limit(token_limit, default=700)
+
     text: str | None = None
     active_mode = provider
     if provider == "claude" and configured:
-        text = _call_claude_text(system_prompt, user_prompt)
+        text = _call_claude_text(system_prompt, user_prompt, max_tokens=effective_token_limit)
     elif provider == "openai" and configured:
-        text = _call_openai_text(system_prompt, user_prompt)
+        text = _call_openai_text(system_prompt, user_prompt, max_tokens=effective_token_limit)
     elif provider == "heuristic":
         text = None
     else:
-        text = _call_claude_text(system_prompt, user_prompt) or _call_openai_text(system_prompt, user_prompt)
+        text = _call_claude_text(system_prompt, user_prompt, max_tokens=effective_token_limit) or _call_openai_text(system_prompt, user_prompt, max_tokens=effective_token_limit)
         if text:
             active_mode = "claude" if (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_API_KEY")) else "openai"
 
@@ -377,6 +427,7 @@ def query_ai(prompt: str, context: dict[str, Any] | None = None) -> dict[str, An
         return {
             "mode": active_mode,
             "answer": text,
+            "token_limit": effective_token_limit,
         }
 
     lower = clean_prompt.lower()
@@ -399,6 +450,7 @@ def query_ai(prompt: str, context: dict[str, Any] | None = None) -> dict[str, An
     return {
         "mode": "heuristic",
         "answer": answer,
+        "token_limit": effective_token_limit,
     }
 
 

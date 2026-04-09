@@ -891,6 +891,11 @@ def ai_query():
 
     include_schedule_context = 1 if int(data.get('include_schedule_context', 0) or 0) else 0
     history = data.get('history') if isinstance(data.get('history'), list) else []
+    token_limit_raw = data.get('token_limit', data.get('reason_token_limit', 700))
+    try:
+        token_limit = int(token_limit_raw)
+    except (TypeError, ValueError):
+        token_limit = 700
 
     context = {
         'history': history,
@@ -911,11 +916,12 @@ def ai_query():
         context['schedule_tasks'] = rows_to_list(schedule_rows)
     db.close()
 
-    result = query_ai(prompt, context)
+    result = query_ai(prompt, context, token_limit=token_limit)
     return jsonify({
         'ok': True,
         'mode': result.get('mode', 'heuristic'),
         'answer': result.get('answer', ''),
+        'token_limit': result.get('token_limit', token_limit),
     })
 
 

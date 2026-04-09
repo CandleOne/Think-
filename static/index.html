@@ -753,6 +753,12 @@ async function renderAiInterface(c) {
             <label>Ask AI</label>
             <textarea id="ai-query-input" name="prompt" placeholder="Example: Build me a tighter morning routine around market prep and fitness." required></textarea>
           </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Reason Token Limit (per query)</label>
+              <input type="number" id="ai-token-limit" name="token_limit" value="700" min="64" max="4096">
+            </div>
+          </div>
           <div class="ai-query-actions">
             <label style="font-size:13px;color:var(--text-muted)"><input type="checkbox" id="ai-include-schedule" checked> Include schedule context</label>
             <div style="display:flex;gap:8px">
@@ -781,6 +787,7 @@ function resetAiChat() {
 async function sendAiQuery() {
   const input = document.getElementById('ai-query-input');
   const includeSchedule = document.getElementById('ai-include-schedule');
+  const tokenLimitEl = document.getElementById('ai-token-limit');
   if (!input) return;
   const prompt = (input.value || '').trim();
   if (!prompt) {
@@ -804,6 +811,7 @@ async function sendAiQuery() {
       prompt,
       history,
       include_schedule_context: includeSchedule && includeSchedule.checked ? 1 : 0,
+      token_limit: tokenLimitEl && tokenLimitEl.value ? Number(tokenLimitEl.value) : 700,
     },
   });
 
@@ -817,7 +825,7 @@ async function sendAiQuery() {
   aiChatHistory.push({
     role: 'assistant',
     content: String(res.answer || '').trim() || 'No answer returned.',
-    mode: res.mode || 'heuristic',
+    mode: `${res.mode || 'heuristic'} · limit ${res.token_limit || 'n/a'}`,
   });
   renderAiMessages();
 }
