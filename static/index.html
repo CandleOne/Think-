@@ -200,6 +200,10 @@ a:hover { text-decoration: underline; }
 .today-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .today-stat { font-size: 11px; border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; color: var(--text-muted); background: var(--surface2); }
 .today-goal-score { font-size: 11px; color: var(--accent); font-weight: 600; }
+.goal-select-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; background: var(--surface); }
+.goal-select-inline.selected { color: var(--accent); border-color: rgba(88,166,255,0.45); }
+.goal-select-inline input { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
+.goal-picker-check { width: 16px; height: 16px; accent-color: var(--accent); margin-right: 8px; }
 @media (max-width: 960px) {
   .today-combo { grid-template-columns: 1fr; }
 }
@@ -2236,9 +2240,8 @@ async function renderGoalArchive(c) {
       const checked = _todaySelectedArchiveIds.includes(aid);
       return `
         <label class="archive-goal-card" style="cursor:pointer;align-items:center" for="goal-pick-${esc(aid)}">
-          <input id="goal-pick-${esc(aid)}" type="checkbox" ${checked ? 'checked' : ''}
-            onchange="toggleTodayArchiveSelection('${esc(aid)}', this.checked)"
-            style="margin-right:8px;accent-color:var(--accent)">
+          <input id="goal-pick-${esc(aid)}" class="goal-picker-check" type="checkbox" ${checked ? 'checked' : ''}
+            onchange="toggleTodayArchiveSelection('${esc(aid)}', this.checked)">
           <div class="agc-body">
             <div class="agc-title">${esc(g.title)}</div>
             <div class="agc-tags">
@@ -2274,6 +2277,9 @@ async function renderGoalArchive(c) {
       const overdue = g.target_date && String(g.target_date).slice(0, 10) < todayIso;
       const reason = g.reason || g.ai_reasoning || '';
       const isEditableGoal = g.source_type === 'goal';
+      const archiveId = String(g.archive_id || '');
+      const archiveIdArg = JSON.stringify(archiveId);
+      const selected = _todaySelectedArchiveIds.includes(archiveId);
       const sectionKeyArg = JSON.stringify(String(g.section_key || ''));
       return `
         <div class="archive-goal-card">
@@ -2287,6 +2293,7 @@ async function renderGoalArchive(c) {
               ${g.score != null ? `<span class="agc-tag">score ${Math.round(Number(g.score || 0))}</span>` : ''}
               ${(g.planned_start && g.planned_end) ? `<span class="agc-tag">🕒 ${esc(g.planned_start)} - ${esc(g.planned_end)}</span>` : ''}
               ${g.target_date ? `<span class="agc-tag date ${overdue ? 'overdue' : ''}">📅 ${esc(g.target_date)}${dueToday ? ' (today)' : (overdue ? ' ⚠' : '')}</span>` : ''}
+              ${isEditableGoal ? `<label class="goal-select-inline ${selected ? 'selected' : ''}"><input type="checkbox" ${selected ? 'checked' : ''} onchange='toggleTodayArchiveSelection(${archiveIdArg}, this.checked)'>Pick today</label>` : ''}
             </div>
             ${reason ? `<div class="today-goal-score" style="margin-top:6px">${esc(reason)}</div>` : ''}
           </div>
@@ -2312,6 +2319,9 @@ async function renderGoalArchive(c) {
         const priorityText = g.priority === 2 ? 'High' : g.priority === 1 ? 'Medium' : 'Low';
         const kindLabel = g.item_kind === 'long_term_objective' ? 'Long-Term Objective' : (g.item_kind === 'task' ? 'Task' : 'Goal');
         const isEditableGoal = g.source_type === 'goal';
+        const archiveId = String(g.archive_id || '');
+        const archiveIdArg = JSON.stringify(archiveId);
+        const selected = _todaySelectedArchiveIds.includes(archiveId);
         const isOverdue = g.target_date && g.target_date < today && !g.is_completed;
         const sourceLabel = g.source_type === 'custom_item' ? 'Custom Section' : (g.source_type === 'task' ? 'Goal Task' : 'Goal');
         const sectionKeyArg = JSON.stringify(String(g.section_key || ''));
@@ -2329,6 +2339,7 @@ async function renderGoalArchive(c) {
                 <span class="agc-tag">${priorityText} priority</span>
                 ${g.target_date ? `<span class="agc-tag date ${isOverdue ? 'overdue' : ''}">📅 ${esc(g.target_date)}${isOverdue ? ' ⚠' : ''}</span>` : ''}
                 ${g.is_completed ? `<span class="agc-tag" style="color:var(--green);border-color:rgba(63,185,80,0.3)">✓ Done</span>` : ''}
+                ${(isEditableGoal && !g.is_completed) ? `<label class="goal-select-inline ${selected ? 'selected' : ''}"><input type="checkbox" ${selected ? 'checked' : ''} onchange='toggleTodayArchiveSelection(${archiveIdArg}, this.checked)'>Pick today</label>` : ''}
               </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
