@@ -5,6 +5,7 @@ Flask backend serving API + frontend for managing the life optimization database
 import sqlite3
 import os
 from flask import Flask, request, jsonify, send_from_directory
+from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates
 
 app = Flask(__name__, static_folder='static')
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lifeoptimization.db')
@@ -667,6 +668,14 @@ BUILTIN_PAGES = {
 }
 
 
+def slugify_label(value):
+    slug = ''.join(ch.lower() if ch.isalnum() else '_' for ch in str(value).strip())
+    while '__' in slug:
+        slug = slug.replace('__', '_')
+    slug = slug.strip('_')
+    return slug or 'section'
+
+
 # ── Master Schedule ───────────────────────────────────────
 
 @app.route('/api/schedule')
@@ -684,6 +693,148 @@ def get_schedule():
     ''').fetchall()
     db.close()
     return jsonify(rows_to_list(rows))
+
+
+@app.route('/api/ai/status')
+def ai_status():
+    return jsonify({
+        'ok': True,
+        'provider': 'openai' if os.environ.get('OPENAI_API_KEY') else 'heuristic',
+        'model': os.environ.get('AI_BRAIN_MODEL', 'gpt-4o-mini'),
+        'configured': bool(os.environ.get('OPENAI_API_KEY'))
+    })
+
+
+@app.route('/api/ai/optimize-schedule', methods=['POST'])
+def ai_optimize_schedule():
+    data, error = get_json_payload()
+    if error:
+        return error
+
+    section_key = (data.get('section_key') or '').strip() or None
+    apply_updates_now = 1 if int(data.get('apply', 0) or 0) else 0
+    preferences = data.get('preferences') if isinstance(data.get('preferences'), dict) else {}
+    provided_updates = data.get('updates') if isinstance(data.get('updates'), list) else None
+
+    db = get_db()
+    query = '''
+        SELECT ci.id, ci.section_key, ci.name, ci.sort_order, ci.subgroup, ci.task_time, ci.task_interval,
+               s.color AS status_color
+        FROM custom_items ci
+        JOIN sidebar_sections ss ON ci.section_key = ss.page_key
+        JOIN statuses s ON ci.status_id = s.id
+        WHERE ss.is_schedule = 1 AND ci.is_task = 1
+    '''
+    params = []
+    if section_key:
+        query += ' AND ci.section_key = ?'
+        params.append(section_key)
+    query += ' ORDER BY ci.section_key, ci.sort_order, ci.name'
+
+    tasks = rows_to_list(db.execute(query, params).fetchall())
+    if not tasks:
+        db.close()
+        return api_error('No schedule tasks found to optimize', 404)
+
+    if provided_updates is not None:
+        plan = type('obj', (), {
+            'mode': 'provided',
+            'summary': f'Applying provided plan with {len(provided_updates)} updates.',
+            'updates': provided_updates,
+        })
+    else:
+        plan = optimize_schedule(tasks, preferences)
+    applied_count = 0
+    if apply_updates_now:
+        applied_count = apply_schedule_updates(db, plan.updates)
+        db.commit()
+
+    db.close()
+    return jsonify({
+        'ok': True,
+        'mode': plan.mode,
+        'summary': plan.summary,
+        'updates': plan.updates,
+        'applied_count': applied_count
+    })
+
+
+@app.route('/api/ai/build-routine', methods=['POST'])
+def ai_build_routine():
+    data, error = get_json_payload(required_fields=['title', 'goal'])
+    if error:
+        return error
+
+    apply_now = 1 if int(data.get('apply', 0) or 0) else 0
+    db = get_db()
+    sections = rows_to_list(db.execute('SELECT * FROM sidebar_sections ORDER BY sort_order, id').fetchall())
+    plan = build_routine_plan(data, sections)
+
+    created_page_key = None
+    created_items = 0
+    if apply_now:
+        section_label = plan.get('section_label') or data.get('title')
+        group_name = plan.get('group_name') or data.get('group_name') or 'Routines'
+        section_type = (plan.get('section_type') or 'schedule').strip().lower()
+        if section_type not in {'default', 'schedule', 'long_term_objective'}:
+            section_type = 'schedule'
+
+        base_key = 'custom_' + slugify_label(section_label)
+        page_key = base_key
+        i = 2
+        while db.execute('SELECT 1 FROM sidebar_sections WHERE page_key=?', (page_key,)).fetchone():
+            page_key = f'{base_key}_{i}'
+            i += 1
+
+        max_order = db.execute('SELECT MAX(sort_order) FROM sidebar_sections').fetchone()[0] or 0
+        db.execute(
+            'INSERT INTO sidebar_sections (group_name, label, page_key, sort_order, is_builtin, is_schedule, is_long_term_section) VALUES (?,?,?,?,0,?,?)',
+            (group_name, section_label, page_key, max_order + 1,
+             1 if section_type == 'schedule' else 0,
+             1 if section_type == 'long_term_objective' else 0)
+        )
+        created_page_key = page_key
+
+        status_rows = rows_to_list(db.execute('SELECT id, color FROM statuses').fetchall())
+        status_by_color = {r['color']: r['id'] for r in status_rows}
+        default_status_id = status_by_color.get('blue') or (status_rows[0]['id'] if status_rows else 1)
+
+        for idx, item in enumerate(plan.get('items', [])):
+            status_id = status_by_color.get(str(item.get('status_color', 'blue')).lower(), default_status_id)
+            db.execute(
+                '''
+                INSERT INTO custom_items (
+                    section_key, name, status_id, notes, sort_order, is_task,
+                    task_time, task_interval, subgroup, is_long_term_objective, objective_completed
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,0)
+                ''',
+                (
+                    page_key,
+                    str(item.get('name') or f'Routine task {idx + 1}').strip(),
+                    status_id,
+                    item.get('notes'),
+                    idx,
+                    1,
+                    item.get('task_time'),
+                    item.get('task_interval') or data.get('cadence') or 'daily',
+                    item.get('subgroup'),
+                    1 if section_type == 'long_term_objective' else 0,
+                )
+            )
+            created_items += 1
+        db.commit()
+
+    db.close()
+    return jsonify({
+        'ok': True,
+        'mode': plan.get('mode', 'heuristic'),
+        'summary': plan.get('summary', ''),
+        'section_label': plan.get('section_label'),
+        'section_type': plan.get('section_type'),
+        'items': plan.get('items', []),
+        'created_page_key': created_page_key,
+        'created_items': created_items
+    })
 
 
 @app.route('/api/sidebar', methods=['POST'])

@@ -1886,6 +1886,156 @@ function toggleWeekTask(dayIdx, taskId, checked) {
   loadPage('schedule');
 }
 
+let lastAiSchedulePlan = null;
+
+function openAiOptimizeModal() {
+  const scheduleSections = sidebarSections.filter(s => s.is_schedule);
+  openModal(`
+    <h3>AI Optimize Tasks</h3>
+    <form id="ai-optimize-form">
+      <div class="form-group">
+        <label>Scope</label>
+        <select name="section_key">
+          <option value="">All schedule sections</option>
+          ${scheduleSections.map(s => `<option value="${esc(s.page_key)}">${esc(s.label)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Start Time</label><input name="start_time" value="7:00 AM"></div>
+        <div class="form-group"><label>End Time</label><input name="end_time" value="10:00 PM"></div>
+      </div>
+      <div class="form-group"><label>Break Minutes</label><input type="number" name="break_minutes" value="10" min="0" max="120"></div>
+      <div class="form-group">
+        <label><input type="checkbox" name="apply" value="1"> Apply changes immediately</label>
+      </div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="runAiOptimize()">Generate Plan</button>
+    </div>
+  `);
+}
+
+async function runAiOptimize() {
+  const data = getFormData('ai-optimize-form');
+  const payload = {
+    section_key: data.section_key || null,
+    apply: data.apply ? 1 : 0,
+    preferences: {
+      start_time: data.start_time || '7:00 AM',
+      end_time: data.end_time || '10:00 PM',
+      break_minutes: Number(data.break_minutes || 10),
+    },
+  };
+  const res = await api('ai/optimize-schedule', { method: 'POST', body: payload });
+  if (showApiError(res)) return;
+
+  if (payload.apply) {
+    closeModal();
+    toast(`AI applied ${res.applied_count || 0} updates (${res.mode})`);
+    loadPage('schedule');
+    return;
+  }
+
+  lastAiSchedulePlan = { ...payload, updates: res.updates || [] };
+  const preview = (res.updates || []).slice(0, 12);
+  openModal(`
+    <h3>AI Schedule Preview</h3>
+    <div class="card-subtitle">${esc(res.summary || '')}</div>
+    <div class="card-subtitle" style="margin-bottom:10px">Mode: ${esc(res.mode || 'heuristic')} · ${res.updates ? res.updates.length : 0} updates</div>
+    <div style="max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg)">
+      ${preview.map(u => `<div class="item-row" style="padding:8px 10px"><span class="item-name">${esc(u.name || 'Task')}</span><span class="schedule-task-time">${esc(u.task_time || '')}</span><span class="item-category">${esc(u.subgroup || '')}</span></div>`).join('')}
+      ${res.updates && res.updates.length > preview.length ? `<div class="item-row" style="color:var(--text-muted)">...and ${res.updates.length - preview.length} more</div>` : ''}
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Close</button>
+      <button class="btn btn-primary" onclick="applyLastAiSchedulePlan()">Apply This Plan</button>
+    </div>
+  `);
+}
+
+async function applyLastAiSchedulePlan() {
+  if (!lastAiSchedulePlan || !Array.isArray(lastAiSchedulePlan.updates) || lastAiSchedulePlan.updates.length === 0) {
+    toast('No AI plan to apply');
+    return;
+  }
+  const res = await api('ai/optimize-schedule', {
+    method: 'POST',
+    body: {
+      section_key: lastAiSchedulePlan.section_key,
+      apply: 1,
+      updates: lastAiSchedulePlan.updates,
+      preferences: lastAiSchedulePlan.preferences,
+    },
+  });
+  if (showApiError(res)) return;
+  closeModal();
+  toast(`Applied ${res.applied_count || 0} AI updates`);
+  loadPage('schedule');
+}
+
+function openAiRoutineModal() {
+  openModal(`
+    <h3>AI Build Routine</h3>
+    <form id="ai-routine-form">
+      <div class="form-row">
+        <div class="form-group"><label>Routine Title</label><input name="title" placeholder="e.g. Market Analysis Routine" required></div>
+        <div class="form-group"><label>Group</label><input name="group_name" value="Routines"></div>
+      </div>
+      <div class="form-group"><label>Goal</label><textarea name="goal" placeholder="What should this routine optimize?" required></textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label>Cadence</label>
+          <select name="cadence">
+            <option value="daily">Daily</option>
+            <option value="every other day">Every Other Day</option>
+            <option value="weekly">Weekly</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Available Minutes</label><input type="number" name="available_minutes" value="90" min="15" max="480"></div>
+      </div>
+      <div class="form-group"><label><input type="checkbox" name="apply" value="1" checked> Create section and tasks now</label></div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="runAiRoutineBuilder()">Generate Routine</button>
+    </div>
+  `);
+}
+
+async function runAiRoutineBuilder() {
+  const data = getFormData('ai-routine-form');
+  const payload = {
+    title: data.title,
+    goal: data.goal,
+    group_name: data.group_name || 'Routines',
+    cadence: data.cadence || 'daily',
+    available_minutes: Number(data.available_minutes || 90),
+    apply: data.apply ? 1 : 0,
+  };
+  const res = await api('ai/build-routine', { method: 'POST', body: payload });
+  if (showApiError(res)) return;
+
+  if (payload.apply && res.created_page_key) {
+    closeModal();
+    toast(`Created routine: ${res.section_label} (${res.created_items || 0} tasks)`);
+    await refreshCoreData();
+    navigateTo(res.created_page_key);
+    return;
+  }
+
+  openModal(`
+    <h3>AI Routine Preview</h3>
+    <div class="card-subtitle">${esc(res.summary || '')}</div>
+    <div style="max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg)">
+      ${(res.items || []).map(i => `<div class="item-row" style="padding:8px 10px"><span class="item-name">${esc(i.name || '')}</span><span class="schedule-task-time">${esc(i.task_time || '')}</span><span class="item-category">${esc(i.task_interval || '')}</span></div>`).join('')}
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Close</button>
+      <button class="btn btn-primary" onclick="openAiRoutineModal()">Edit Request</button>
+    </div>
+  `);
+}
+
 async function renderSchedule(c) {
   const tasks = await getList('schedule', 'Failed to load schedule');
   const scheduleSections = sidebarSections.filter(s => s.is_schedule);
@@ -2200,6 +2350,10 @@ async function renderSchedule(c) {
       <div>
         <h2>📅 Master Schedule</h2>
         <span style="color:var(--text-muted);font-size:13px">${tasks.length} task${tasks.length !== 1 ? 's' : ''} across ${scheduleSections.length} schedule${scheduleSections.length !== 1 ? 's' : ''}</span>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="openAiOptimizeModal()">AI Optimize Tasks</button>
+          <button class="btn" onclick="openAiRoutineModal()">AI Build Routine</button>
+        </div>
       </div>
       <div class="live-clock-box">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
