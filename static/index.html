@@ -219,6 +219,14 @@ a:hover { text-decoration: underline; }
 .task-badge { display: inline-block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(88,166,255,0.15); color: var(--blue); padding: 1px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle; }
 .qo-badge { background: rgba(163,113,247,0.15); color: var(--purple, #a371f7); }
 .lto-badge { background: rgba(246,190,46,0.2); color: #ffd86b; }
+.sessions-badge { background: rgba(56,173,169,0.18); color: #38ada9; }
+.lto-sessions-info { font-size: 12px; color: #38ada9; padding: 2px 0 4px 0; font-weight: 500; }
+.schedule-session-progress { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.session-bar { flex: 1; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
+.session-bar-fill { height: 100%; background: #38ada9; border-radius: 3px; transition: width 0.3s; }
+.session-text { font-size: 11px; color: #38ada9; white-space: nowrap; font-weight: 600; }
+.session-done-btn { font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid #38ada9; color: #38ada9; background: transparent; cursor: pointer; white-space: nowrap; }
+.session-done-btn:hover { background: rgba(56,173,169,0.15); }
 .qo-badge-sm { display: inline-block; font-size: 9px; font-weight: 600; background: rgba(163,113,247,0.15); color: var(--purple, #a371f7); padding: 0 4px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
 .schedule-task-qo { border-left: 2px solid var(--purple, #a371f7); }
 .task-schedule { font-size: 12px; color: var(--accent); padding: 2px 12px 4px 28px; }
@@ -1103,12 +1111,14 @@ async function renderCustomSection(c, sectionKey) {
           <div class="lto-head">
             ${statusDot(it.status_color)}
             <span class="item-name lto-name">${esc(it.name)} ${longTermBadge}${taskBadge}</span>
+            ${it.sessions_required > 1 ? `<span class="task-badge sessions-badge" title="${it.sessions_required} study sessions required">${it.sessions_required} sessions</span>` : ''}
             ${it.link ? `<a href="${esc(it.link)}" target="_blank" class="item-link">Link</a>` : ''}
             ${completeBtn}
             <button class="btn-icon" onclick="openCustomItemModal('${esc(sKey)}', ${it.id})">✎</button>
             <button class="btn-icon btn-danger" onclick="deleteCustomItem('${esc(sKey)}', ${it.id})">✕</button>
           </div>
           ${isLocked ? `<div class="lto-notes" style="color:var(--orange)">Locked until completed: ${esc(lockReason)}</div>` : ''}
+          ${it.sessions_required > 1 ? `<div class="lto-sessions-info">📅 ${it.sessions_required} day${it.sessions_required !== 1 ? 's' : ''} of study required to complete this objective</div>` : ''}
           ${taskInfo}
           ${it.notes ? `<div class="lto-notes">${esc(it.notes).replace(/\n/g, '<br>')}</div>` : ''}
         </div>
@@ -2355,6 +2365,18 @@ async function removeScheduleEvent(sectionKey, itemId) {
   renderGoalArchive(document.getElementById('content'));
 }
 
+async function markSessionDone(sectionKey, itemId) {
+  const res = await api(`custom/${sectionKey}/${itemId}/session`, { method: 'PUT' });
+  if (showApiError(res)) return;
+  if (res.all_done) {
+    toast(`All ${res.sessions_required} sessions completed!`);
+  } else {
+    toast(`Session ${res.sessions_completed}/${res.sessions_required} recorded`);
+  }
+  _todayOptimizedPlan = null;
+  renderGoalArchive(document.getElementById('content'));
+}
+
 async function renderGoalArchive(c) {
   c.innerHTML = `<div class="page-header"><h2>Goal Archive</h2><button class="btn btn-primary" onclick="openGoalModal()">+ Add Goal</button></div><div class="analysis-loading"><span class="spin">⟳</span> Loading…</div>`;
   const entries = await fetch('/api/goals/archive').then(r => r.json()).catch(() => []);
@@ -2486,6 +2508,7 @@ async function renderGoalArchive(c) {
       const aid = String(g.archive_id || '');
       const checked = _todaySelectedArchiveIds.includes(aid);
       const kindLabel = g.item_kind === 'long_term_objective' ? 'Long-Term Objective' : (g.item_kind === 'task' ? 'Task' : 'Goal');
+      const sessReq = Number(g.sessions_required || 0);
       return `
         <label class="archive-goal-card" style="cursor:pointer;align-items:center" for="goal-pick-${esc(aid)}">
           <input id="goal-pick-${esc(aid)}" class="goal-picker-check" type="checkbox" ${checked ? 'checked' : ''}
@@ -2495,6 +2518,7 @@ async function renderGoalArchive(c) {
             <div class="agc-tags">
               <span class="agc-tag area">${esc(g.area_name || '')}</span>
               <span class="agc-tag">${kindLabel}</span>
+              ${sessReq > 1 ? `<span class="agc-tag" style="color:#38ada9">📅 ${sessReq} sessions</span>` : ''}
               <span class="agc-tag">~${Math.round(Number(g._mins || 0))} min</span>
               <span class="agc-tag">score ${Math.round(Number(g._score || 0))}</span>
             </div>
@@ -2505,6 +2529,16 @@ async function renderGoalArchive(c) {
     const scheduleCards = todaySchedule.map(g => {
       const sectionKeyArg = JSON.stringify(String(g.section_key || ''));
       const itemId = g.id;
+      const sessReq = Number(g.sessions_required || g.task_count || 0);
+      const sessDone = Number(g.sessions_completed || 0);
+      const hasSessionTracking = sessReq > 0;
+      const pct = hasSessionTracking ? Math.min(100, Math.round((sessDone / sessReq) * 100)) : 0;
+      const sessionBar = hasSessionTracking ? `
+        <div class="schedule-session-progress">
+          <span class="session-text">${sessDone}/${sessReq} sessions</span>
+          <div class="session-bar"><div class="session-bar-fill" style="width:${pct}%"></div></div>
+          ${sessDone < sessReq ? `<button class="session-done-btn" onclick="event.stopPropagation(); markSessionDone(${sectionKeyArg}, ${itemId})">+1 Session</button>` : '<span class="session-text" style="color:var(--green)">✓ Done</span>'}
+        </div>` : '';
       return `
         <div class="archive-goal-card ${g.is_completed ? 'completed-card' : ''}" id="sched-card-${itemId}">
           <div class="agc-status" style="background:var(--blue)"></div>
@@ -2515,7 +2549,9 @@ async function renderGoalArchive(c) {
               ${g.task_time ? `<span class="agc-tag">🕒 ${esc(g.task_time)}</span>` : `<span class="agc-tag">Unscheduled</span>`}
               ${g.task_interval ? `<span class="agc-tag">${esc(g.task_interval)}</span>` : ''}
               ${g.subgroup ? `<span class="agc-tag">${esc(g.subgroup)}</span>` : ''}
+              ${hasSessionTracking ? `<span class="agc-tag" style="color:#38ada9">📅 ${sessReq} sessions</span>` : ''}
             </div>
+            ${sessionBar}
           </div>
           <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
             <button class="btn-icon" onclick='loadPage(${sectionKeyArg})' title="Open section">↗</button>
@@ -3152,6 +3188,17 @@ async function runAiRoutineBuilder() {
   `);
 }
 
+async function markScheduleSession(sectionKey, itemId) {
+  const res = await api(`custom/${sectionKey}/${itemId}/session`, { method: 'PUT' });
+  if (showApiError(res)) return;
+  if (res.all_done) {
+    toast(`All ${res.sessions_required} sessions completed!`);
+  } else {
+    toast(`Session ${res.sessions_completed}/${res.sessions_required} recorded`);
+  }
+  loadPage(currentPage);
+}
+
 async function renderSchedule(c) {
   const tasks = await getList('schedule', 'Failed to load schedule');
   const scheduleSections = sidebarSections.filter(s => s.is_schedule);
@@ -3200,14 +3247,23 @@ async function renderSchedule(c) {
 
   function renderTask(t, showSection) {
     const isQO = t.is_quick_objective;
+    const sessReq = Number(t.sessions_required || t.task_count || 0);
+    const sessDone = Number(t.sessions_completed || 0);
+    const hasSessionTracking = sessReq > 0;
+    const pct = hasSessionTracking ? Math.min(100, Math.round((sessDone / sessReq) * 100)) : 0;
     return `<div class="schedule-task ${isQO ? 'schedule-task-qo' : ''}">
       ${statusDot(t.status_color)}
       <div class="schedule-task-info">
         <div class="schedule-task-name">${esc(t.name)}${isQO ? ' <span class="qo-badge-sm">QO</span>' : ''}</div>
         ${t.notes ? `<div class="schedule-task-meta">${esc(t.notes).substring(0, 80)}${t.notes.length > 80 ? '…' : ''}</div>` : ''}
+        ${hasSessionTracking ? `<div class="schedule-session-progress">
+          <span class="session-text">${sessDone}/${sessReq} sessions</span>
+          <div class="session-bar"><div class="session-bar-fill" style="width:${pct}%"></div></div>
+          ${sessDone < sessReq ? `<button class="session-done-btn" onclick="event.stopPropagation(); markScheduleSession('${esc(t.section_key)}', ${t.id})">+1</button>` : '<span class="session-text" style="color:var(--green)">✓</span>'}
+        </div>` : ''}
       </div>
       ${isQO ? '<span class="schedule-task-time" style="font-style:italic;opacity:0.6">anytime</span>' : (t.task_time ? `<span class="schedule-task-time">${esc(t.task_time)}</span>` : '')}
-      ${t.task_count ? `<span class="schedule-task-time">${t.task_count}×</span>` : ''}
+      ${!hasSessionTracking && t.task_count ? `<span class="schedule-task-time">${t.task_count}×</span>` : ''}
       ${showSection ? `<span class="schedule-task-section">${esc(t.section_label)}</span>` : ''}
       <div class="schedule-task-actions">
         <button class="btn-icon" onclick="openScheduleTaskEditModal('${esc(t.section_key)}', ${t.id})" title="Edit task">✎</button>

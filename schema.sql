@@ -186,6 +186,7 @@ CREATE TABLE IF NOT EXISTS custom_items (
     is_long_term_objective INTEGER DEFAULT 0 CHECK(is_long_term_objective IN (0, 1)),
     is_goal INTEGER DEFAULT 0 CHECK(is_goal IN (0, 1)),
     objective_completed INTEGER DEFAULT 0 CHECK(objective_completed IN (0, 1)),
+    sessions_completed INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );

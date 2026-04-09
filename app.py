@@ -32,7 +32,40 @@ def load_local_env(env_path='.env'):
 
 load_local_env()
 
+import re
+
 from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info, query_ai, query_ai_empowered, analyze_goals, build_today_plan
+
+
+def parse_lto_sessions(name, notes):
+    """Extract the number of study sessions/days required from LTO name and notes.
+
+    Returns an integer >= 1.
+    """
+    if not notes:
+        notes = ''
+    # Pattern 1: "3 days / 4.5h"  or  "1 review day / 1.5h"
+    m = re.search(r'(\d+)\s+(?:review\s+)?days?\s*[/·]', notes)
+    if m:
+        return int(m.group(1))
+    # Pattern 2: Count explicit "Day N" labels in notes (e.g. "Day 1 ... Day 2 ... Day 7")
+    day_labels = re.findall(r'\bDay\s+(\d+)\b', notes)
+    if len(day_labels) >= 2:
+        return len(set(day_labels))
+    # Pattern 3: Name has "Weeks X-Y" or "Week X-Y" → weeks * 5 working days
+    m = re.search(r'Weeks?\s+(\d+)\s*[-–]\s*(\d+)', name)
+    if m:
+        weeks = int(m.group(2)) - int(m.group(1)) + 1
+        return max(1, weeks * 5)
+    # Pattern 4: Parse total hours from notes — "Prep 40-60h" or "~100h" → hours / 1.5
+    m = re.search(r'(?:Prep|Add|~)\s*(\d+)(?:\s*[-–]\s*(\d+))?\s*h', notes, re.IGNORECASE)
+    if m:
+        hours = int(m.group(2) or m.group(1))  # use upper bound
+        return max(1, round(hours / 1.5))
+    # Pattern 5: Checkpoint or single session
+    if name and re.search(r'checkpoint|review sprint', name, re.IGNORECASE):
+        return 1
+    return 1
 
 app = Flask(__name__, static_folder='static')
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lifeoptimization.db')
@@ -52,6 +85,8 @@ def ensure_schema_compatibility():
             conn.execute('ALTER TABLE custom_items ADD COLUMN objective_completed INTEGER DEFAULT 0')
         if 'is_goal' not in columns:
             conn.execute('ALTER TABLE custom_items ADD COLUMN is_goal INTEGER DEFAULT 0')
+        if 'sessions_completed' not in columns:
+            conn.execute('ALTER TABLE custom_items ADD COLUMN sessions_completed INTEGER DEFAULT 0')
 
         sidebar_columns = {row[1] for row in conn.execute("PRAGMA table_info(sidebar_sections)").fetchall()}
         if 'is_long_term_section' not in sidebar_columns:
@@ -1048,12 +1083,15 @@ def get_goals_archive():
         })
 
     for row in custom_rows:
-        rows.append({
+        entry = {
             'archive_id': f"custom_item:{row['id']}",
             'source_type': 'custom_item',
             'item_kind': 'long_term_objective' if int(row.get('is_long_term_objective') or 0) else ('task' if int(row.get('is_task') or 0) else 'goal_item'),
             **row,
-        })
+        }
+        if int(row.get('is_long_term_objective') or 0):
+            entry['sessions_required'] = parse_lto_sessions(row.get('title', ''), row.get('description', ''))
+        rows.append(entry)
 
     def term_bucket(row):
         td = (row.get('target_date') or '').strip()
@@ -1154,7 +1192,12 @@ def get_schedule():
         ORDER BY ci.task_interval, ci.task_time, ci.name
     ''').fetchall()
     db.close()
-    return jsonify(rows_to_list(rows))
+    items = rows_to_list(rows)
+    for item in items:
+        if int(item.get('is_long_term_objective') or 0) or int(item.get('task_count') or 0) > 0:
+            item['sessions_required'] = int(item.get('task_count') or 0) or parse_lto_sessions(item.get('name', ''), item.get('notes', ''))
+            item['sessions_completed'] = int(item.get('sessions_completed') or 0)
+    return jsonify(items)
 
 
 @app.route('/api/ai/status')
@@ -1543,6 +1586,7 @@ def ai_today_plan():
     db = get_db()
     schedule_query = '''
         SELECT ci.id, ci.name, ci.task_time, ci.task_interval, ci.subgroup,
+               ci.task_count, ci.sessions_completed, ci.is_long_term_objective, ci.notes,
                ss.label as section_label, ss.page_key as section_key, ss.is_schedule
         FROM custom_items ci
         JOIN sidebar_sections ss ON ci.section_key = ss.page_key
@@ -1555,6 +1599,12 @@ def ai_today_plan():
     schedule_query += ' ORDER BY ci.task_time, ci.sort_order, ci.name'
     schedule_tasks = rows_to_list(db.execute(schedule_query, params).fetchall())
     db.close()
+
+    for st in schedule_tasks:
+        tc = int(st.get('task_count') or 0)
+        if tc > 0 or int(st.get('is_long_term_objective') or 0):
+            st['sessions_required'] = tc or parse_lto_sessions(st.get('name', ''), st.get('notes', ''))
+            st['sessions_completed'] = int(st.get('sessions_completed') or 0)
 
     archive_response = get_goals_archive()
     archive_items = archive_response.get_json(silent=True)
@@ -1677,6 +1727,12 @@ def ai_today_plan_insert():
                 notes_parts.append(f"AI plan: {rec.get('reason')}")
             notes = '\n\n'.join(p for p in notes_parts if p).strip() or None
 
+            # Parse sessions required for LTO items
+            is_lto = int(item.get('is_long_term_objective') or 0)
+            sessions_required = 0
+            if is_lto or item.get('item_kind') == 'long_term_objective':
+                sessions_required = parse_lto_sessions(name, item.get('description', ''))
+
             duplicate = db.execute(
                 '''
                 SELECT id FROM custom_items
@@ -1693,8 +1749,8 @@ def ai_today_plan_insert():
                 INSERT INTO custom_items (
                     section_key, name, status_id, link, notes, sort_order, is_task,
                     task_time, task_count, task_interval, subgroup, is_quick_objective,
-                    is_long_term_objective, is_goal, objective_completed
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+                    is_long_term_objective, is_goal, objective_completed, sessions_completed
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)
                 ''',
                 (
                     today_section_key,
@@ -1705,7 +1761,7 @@ def ai_today_plan_insert():
                     next_sort,
                     1,
                     task_time,
-                    None,
+                    sessions_required if sessions_required > 0 else None,
                     'daily',
                     subgroup,
                     0,
@@ -1718,6 +1774,7 @@ def ai_today_plan_insert():
                 'archive_id': archive_id,
                 'name': name,
                 'task_time': task_time,
+                'sessions_required': sessions_required,
             })
 
         db.commit()
@@ -1848,7 +1905,11 @@ def get_custom_items(section_key):
         ORDER BY ci.sort_order, ci.name
     ''', (section_key,)).fetchall()
     db.close()
-    return jsonify(rows_to_list(rows))
+    items = rows_to_list(rows)
+    for item in items:
+        if int(item.get('is_long_term_objective') or 0):
+            item['sessions_required'] = parse_lto_sessions(item.get('name', ''), item.get('notes', ''))
+    return jsonify(items)
 
 
 @app.route('/api/custom/<section_key>', methods=['POST'])
@@ -2007,6 +2068,29 @@ def set_custom_objective_completed(section_key, item_id):
     finally:
         db.close()
     return jsonify({'ok': True, 'objective_completed': is_completed})
+
+
+@app.route('/api/custom/<section_key>/<int:item_id>/session', methods=['PUT'])
+def record_session_complete(section_key, item_id):
+    """Increment sessions_completed for a scheduled LTO item."""
+    db = get_db()
+    try:
+        item = db.execute(
+            'SELECT id, task_count, sessions_completed FROM custom_items WHERE id=? AND section_key=?',
+            (item_id, section_key)
+        ).fetchone()
+        if not item:
+            return api_error('Item not found', 404)
+        total = int(item['task_count'] or 0)
+        done = int(item['sessions_completed'] or 0) + 1
+        db.execute(
+            'UPDATE custom_items SET sessions_completed=?, updated_at=datetime(\'now\') WHERE id=?',
+            (done, item_id)
+        )
+        db.commit()
+    finally:
+        db.close()
+    return jsonify({'ok': True, 'sessions_completed': done, 'sessions_required': total, 'all_done': done >= total and total > 0})
 
 
 # ── Optimize Task Placement ──────────────────────────────
