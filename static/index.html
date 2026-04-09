@@ -748,6 +748,7 @@ async function loadPage(page) {
     case 'skincare': return renderSkincare(c);
     case 'pharmacology': return renderPharmacology(c);
     case 'goals': return renderGoals(c);
+    case 'goal_archive': return renderGoalArchive(c);
     case 'schedule': return renderSchedule(c);
     case 'ai_interface': return renderAiInterface(c);
     default:
@@ -2029,6 +2030,113 @@ async function deleteGoal(id) {
   if (showApiError(res)) return;
   toast('Goal deleted');
   loadPage('goals');
+}
+
+// ── Utils ──
+// ── Goal Archive ──
+let _archiveFilter = 'all'; // 'all' | 'active' | 'completed'
+
+async function renderGoalArchive(c) {
+  c.innerHTML = `<div class="page-header"><h2>Goal Archive</h2><button class="btn btn-primary" onclick="openGoalModal()">+ Add Goal</button></div><div class="analysis-loading"><span class="spin">⟳</span> Loading…</div>`;
+  const goals = await fetch('/api/goals/archive').then(r => r.json()).catch(() => []);
+  if (!Array.isArray(goals)) { c.innerHTML = '<div class="card">Failed to load goals.</div>'; return; }
+
+  const TERMS = [
+    { key: 'overdue', label: 'Overdue',     subtitle: 'Past target date' },
+    { key: 'short',   label: 'Short-Term',  subtitle: 'Due within 3 months' },
+    { key: 'medium',  label: 'Medium-Term', subtitle: 'Due within 1 year' },
+    { key: 'long',    label: 'Long-Term',   subtitle: 'Over 1 year away or undated' },
+  ];
+
+  function filterGoals(list) {
+    if (_archiveFilter === 'active') return list.filter(g => !g.is_completed);
+    if (_archiveFilter === 'completed') return list.filter(g => g.is_completed);
+    return list;
+  }
+
+  function buildPage() {
+    const filtered = filterGoals(goals);
+    const totalActive = goals.filter(g => !g.is_completed).length;
+    const totalDone = goals.filter(g => g.is_completed).length;
+
+    const filterBar = `
+      <div class="archive-filters">
+        <span style="font-size:12px;color:var(--text-muted)">Show:</span>
+        ${['all','active','completed'].map(f => `
+          <span class="filter-chip ${_archiveFilter === f ? 'active' : ''}" onclick="setArchiveFilter('${f}')">${
+            f === 'all' ? `All (${goals.length})` : f === 'active' ? `Active (${totalActive})` : `Completed (${totalDone})`
+          }</span>`).join('')}
+      </div>`;
+
+    const sections = TERMS.map(t => {
+      const termGoals = filtered.filter(g => g.term === t.key);
+      if (termGoals.length === 0) return '';
+      const today = new Date().toISOString().slice(0,10);
+
+      const cards = termGoals.map(g => {
+        const statusColor = g.is_completed ? 'var(--green)' : (g.priority === 2 ? 'var(--red)' : g.priority === 1 ? 'var(--orange)' : 'var(--blue)');
+        const priorityText = g.priority === 2 ? 'High' : g.priority === 1 ? 'Medium' : 'Low';
+        const isOverdue = g.target_date && g.target_date < today && !g.is_completed;
+        return `
+          <div class="archive-goal-card ${g.is_completed ? 'completed-card' : ''}">
+            <div class="agc-status" style="background:${statusColor}"></div>
+            <div class="agc-body">
+              <div class="agc-title ${g.is_completed ? 'done' : ''}">${esc(g.title)}</div>
+              ${g.description ? `<div class="agc-desc">${esc(g.description)}</div>` : ''}
+              <div class="agc-tags">
+                <span class="agc-tag area">${esc(g.area_name || '')}</span>
+                <span class="agc-tag">${priorityText} priority</span>
+                ${g.target_date ? `<span class="agc-tag date ${isOverdue ? 'overdue' : ''}">📅 ${esc(g.target_date)}${isOverdue ? ' ⚠' : ''}</span>` : ''}
+                ${g.is_completed ? `<span class="agc-tag" style="color:var(--green);border-color:rgba(63,185,80,0.3)">✓ Done</span>` : ''}
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+              <button class="btn-icon" onclick="openGoalModal(${g.id})" title="Edit">✎</button>
+              <button class="btn-icon ${g.is_completed ? '' : 'btn-danger'}" onclick="archiveToggleGoal(${g.id},${g.is_completed ? 0 : 1})" title="${g.is_completed ? 'Reopen' : 'Complete'}">
+                ${g.is_completed ? '↩' : '✓'}
+              </button>
+            </div>
+          </div>`;
+      }).join('');
+
+      return `
+        <div class="term-section">
+          <div class="term-header">
+            <span class="term-badge ${t.key}">${t.label}</span>
+            <span class="term-subtitle">${t.subtitle}</span>
+            <span class="term-count">${termGoals.length} goal${termGoals.length !== 1 ? 's' : ''}</span>
+          </div>
+          ${cards}
+        </div>`;
+    }).join('');
+
+    const isEmpty = filtered.length === 0;
+
+    c.innerHTML = `
+      <div class="page-header">
+        <h2>Goal Archive</h2>
+        <button class="btn btn-primary" onclick="openGoalModal()">+ Add Goal</button>
+      </div>
+      ${filterBar}
+      ${isEmpty ? '<div class="card"><div class="archive-empty">No goals match this filter.</div></div>' : sections}`;
+  }
+
+  buildPage();
+}
+
+function setArchiveFilter(f) {
+  _archiveFilter = f;
+  renderGoalArchive(document.getElementById('content'));
+}
+
+async function archiveToggleGoal(id, completed) {
+  const goals = await fetch('/api/goals/archive').then(r => r.json()).catch(() => []);
+  const goal = Array.isArray(goals) ? goals.find(g => g.id === id) : null;
+  if (!goal) return;
+  goal.is_completed = completed;
+  const res = await api(`goals/${id}`, { method: 'PUT', body: goal });
+  if (showApiError(res)) return;
+  loadPage('goal_archive');
 }
 
 // ── Utils ──
