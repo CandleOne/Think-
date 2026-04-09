@@ -1282,6 +1282,7 @@ def ai_today_plan():
 
     data = request.get_json(silent=True) or {}
     now_iso = str(data.get('now_iso') or _datetime.utcnow().isoformat())
+    today_section_key = str(data.get('today_section_key') or '').strip() or None
     try:
         end_hour = int(data.get('end_hour', 22) or 22)
     except (TypeError, ValueError):
@@ -1291,14 +1292,19 @@ def ai_today_plan():
     selected_set = {str(x) for x in selected_archive_ids if str(x).strip()}
 
     db = get_db()
-    schedule_tasks = rows_to_list(db.execute('''
+    schedule_query = '''
         SELECT ci.id, ci.name, ci.task_time, ci.task_interval, ci.subgroup,
                ss.label as section_label, ss.page_key as section_key, ss.is_schedule
         FROM custom_items ci
         JOIN sidebar_sections ss ON ci.section_key = ss.page_key
         WHERE ss.is_schedule = 1 AND ci.is_task = 1
-        ORDER BY ci.task_time, ci.sort_order, ci.name
-    ''').fetchall())
+    '''
+    params = []
+    if today_section_key:
+        schedule_query += ' AND ss.page_key = ?'
+        params.append(today_section_key)
+    schedule_query += ' ORDER BY ci.task_time, ci.sort_order, ci.name'
+    schedule_tasks = rows_to_list(db.execute(schedule_query, params).fetchall())
     db.close()
 
     archive_response = get_goals_archive()

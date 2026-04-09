@@ -2092,11 +2092,13 @@ async function optimizeSelectedTodayGoals() {
     toast('Select at least one goal first');
     return;
   }
+  const now = nowInTZ();
   const res = await api('ai/today-plan', {
     method: 'POST',
     body: {
-      now_iso: new Date().toISOString(),
+      now_iso: isoLocalForApi(now),
       timezone: getTimezone(),
+      today_section_key: getTodayScheduleSectionKey(),
       end_hour: 22,
       selected_archive_ids: _todaySelectedArchiveIds,
     },
@@ -2186,7 +2188,7 @@ async function renderGoalArchive(c) {
     const filtered = filterGoals(entries);
     const totalActive = entries.filter(g => !g.is_completed).length;
     const totalDone = entries.filter(g => g.is_completed).length;
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = isoLocalForApi(nowInTZ()).slice(0, 10);
     const totalToday = entries.filter(g => isTodayItem(g, todayIso)).length;
 
     const filterBar = `
@@ -2203,11 +2205,13 @@ async function renderGoalArchive(c) {
       if (_todayOptimizedPlan && !apiHasError(_todayOptimizedPlan)) {
         todayPlanRes = _todayOptimizedPlan;
       } else {
+        const now = nowInTZ();
         todayPlanRes = await api('ai/today-plan', {
           method: 'POST',
           body: {
-            now_iso: new Date().toISOString(),
+            now_iso: isoLocalForApi(now),
             timezone: getTimezone(),
+            today_section_key: getTodayScheduleSectionKey(),
             end_hour: 22,
           },
         });
@@ -2259,11 +2263,12 @@ async function renderGoalArchive(c) {
         <div class="archive-goal-card ${g.is_completed ? 'completed-card' : ''}">
           <div class="agc-status" style="background:var(--blue)"></div>
           <div class="agc-body">
-            <div class="agc-title ${g.is_completed ? 'done' : ''}">${esc(g.title)}</div>
+            <div class="agc-title ${g.is_completed ? 'done' : ''}">${esc(g.name || g.title || '')}</div>
             <div class="agc-tags">
-              <span class="agc-tag area">${esc(g.area_name || '')}</span>
+              <span class="agc-tag area">${esc(g.section_label || g.area_name || '')}</span>
               ${g.task_time ? `<span class="agc-tag">🕒 ${esc(g.task_time)}</span>` : `<span class="agc-tag">Unscheduled</span>`}
               ${g.task_interval ? `<span class="agc-tag">${esc(g.task_interval)}</span>` : ''}
+              ${g.subgroup ? `<span class="agc-tag">${esc(g.subgroup)}</span>` : ''}
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
@@ -2447,6 +2452,28 @@ function nowInTZ() {
   const tz = getTimezone();
   const s = new Date().toLocaleString('en-US', { timeZone: tz });
   return new Date(s);
+}
+function isoLocalForApi(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${y}-${m}-${day}T${hh}:${mm}:${ss}`;
+}
+function getTodayScheduleSectionKey() {
+  const dayMap = {
+    0: 'custom_weekend_routine',
+    1: 'custom_mwf_routine',
+    2: 'custom_tuth_routine',
+    3: 'custom_wed_routine',
+    4: 'custom_thu_routine',
+    5: 'custom_mwf_routine',
+    6: 'custom_weekend_routine',
+  };
+  const now = nowInTZ();
+  return dayMap[now.getDay()] || '';
 }
 
 // ── Live Clock ──
