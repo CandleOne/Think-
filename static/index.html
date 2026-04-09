@@ -2343,6 +2343,15 @@ function resetTodayGoalOptimization() {
   renderGoalArchive(document.getElementById('content'));
 }
 
+async function removeScheduleEvent(sectionKey, itemId) {
+  if (!confirm('Remove this event from today\'s schedule?')) return;
+  const res = await api(`custom/${sectionKey}/${itemId}`, { method: 'DELETE' });
+  if (showApiError(res)) return;
+  toast('Event removed from schedule');
+  _todayOptimizedPlan = null;
+  renderGoalArchive(document.getElementById('content'));
+}
+
 async function renderGoalArchive(c) {
   c.innerHTML = `<div class="page-header"><h2>Goal Archive</h2><button class="btn btn-primary" onclick="openGoalModal()">+ Add Goal</button></div><div class="analysis-loading"><span class="spin">⟳</span> Loading…</div>`;
   const entries = await fetch('/api/goals/archive').then(r => r.json()).catch(() => []);
@@ -2492,8 +2501,9 @@ async function renderGoalArchive(c) {
 
     const scheduleCards = todaySchedule.map(g => {
       const sectionKeyArg = JSON.stringify(String(g.section_key || ''));
+      const itemId = g.id;
       return `
-        <div class="archive-goal-card ${g.is_completed ? 'completed-card' : ''}">
+        <div class="archive-goal-card ${g.is_completed ? 'completed-card' : ''}" id="sched-card-${itemId}">
           <div class="agc-status" style="background:var(--blue)"></div>
           <div class="agc-body">
             <div class="agc-title ${g.is_completed ? 'done' : ''}">${esc(g.name || g.title || '')}</div>
@@ -2506,6 +2516,7 @@ async function renderGoalArchive(c) {
           </div>
           <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
             <button class="btn-icon" onclick='loadPage(${sectionKeyArg})' title="Open section">↗</button>
+            <button class="btn-icon btn-danger" onclick='removeScheduleEvent(${sectionKeyArg}, ${itemId})' title="Remove from schedule">✕</button>
           </div>
         </div>`;
     }).join('');
