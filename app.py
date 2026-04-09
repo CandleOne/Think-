@@ -1045,6 +1045,7 @@ def get_goals_archive():
             ci.task_time,
             ci.task_interval,
             ci.section_key,
+            ci.sort_order,
             COALESCE(ci.is_task, 0) AS is_task,
             COALESCE(ci.is_long_term_objective, 0) AS is_long_term_objective,
             COALESCE(ci.is_goal, 0) AS is_goal
@@ -1058,6 +1059,23 @@ def get_goals_archive():
     ''').fetchall())
 
     db.close()
+
+    # Build LTO lock map: for each section, walk in sort_order;
+    # once we hit the first incomplete LTO, everything after it is locked.
+    lto_locked = set()  # set of item ids that are locked
+    sections_lto = {}  # section_key -> list of (id, is_completed) in order
+    for row in custom_rows:
+        if int(row.get('is_long_term_objective') or 0) != 1:
+            continue
+        sk = row.get('section_key', '')
+        sections_lto.setdefault(sk, []).append((row['id'], int(row.get('is_completed') or 0)))
+    for sk, items in sections_lto.items():
+        first_incomplete_seen = False
+        for item_id, is_completed in items:
+            if first_incomplete_seen:
+                lto_locked.add(item_id)
+            elif not is_completed:
+                first_incomplete_seen = True
 
     rows = []
     for row in goal_rows:
@@ -1091,6 +1109,7 @@ def get_goals_archive():
         }
         if int(row.get('is_long_term_objective') or 0):
             entry['sessions_required'] = parse_lto_sessions(row.get('title', ''), row.get('description', ''))
+            entry['is_locked'] = 1 if row['id'] in lto_locked else 0
         rows.append(entry)
 
     def term_bucket(row):
@@ -1617,6 +1636,9 @@ def ai_today_plan():
         if not isinstance(item, dict):
             continue
         if int(item.get('is_completed') or 0):
+            continue
+        # Locked LTOs (prerequisite not done) are not eligible
+        if int(item.get('is_locked') or 0):
             continue
         source_type = str(item.get('source_type') or '')
         item_kind = str(item.get('item_kind') or '')

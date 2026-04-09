@@ -2400,6 +2400,8 @@ async function renderGoalArchive(c) {
   }
 
   function isTodayItem(g, today) {
+    // Locked LTOs (prerequisite not done) are never eligible for today
+    if (Number(g.is_locked || 0) === 1) return false;
     const target = (g.target_date || '').slice(0, 10);
     if (target) {
       if (target <= today && !g.is_completed) return true; // overdue + due today
@@ -2492,8 +2494,12 @@ async function renderGoalArchive(c) {
     const selectedCandidates = Number(todayPlanRes?.selected_candidates || 0);
     const planSummary = String(todayPlanRes?.summary || '');
 
+    const recommendedIds = new Set(recommendedGoals.map(g => String(g.archive_id || '')));
+
     const selectableGoals = entries
       .filter(g => !g.is_completed)
+      .filter(g => Number(g.is_locked || 0) !== 1)
+      .filter(g => !recommendedIds.has(String(g.archive_id || '')))
       .filter(g => !(g.source_type === 'custom_item' && Number(g.is_schedule_section || 0) === 1))
       .filter(g => ['goal', 'task', 'goal_item', 'long_term_objective'].includes(String(g.item_kind || '')) || ['goal', 'task', 'custom_item'].includes(String(g.source_type || '')))
       .map(g => ({ ...g, _score: goalOpportunityScore(g, todayIso), _mins: estimateGoalSessionMinutes(g) }))
