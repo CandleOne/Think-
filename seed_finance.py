@@ -139,71 +139,71 @@ add('Certification: CIPM or FRM Part II', ORANGE,
 add('━━━ CERTIFICATION ROADMAP (INTEGRATED) ━━━', BLUE,
     'Use certifications to validate applied skill after each technical phase, not before.')
 add('Month 3 target: FMVA', BLUE,
-    'Cost ~$497. Prep 40-60h. Best after valuation/LBO phase.', 1)
+    'Cost ~$497. Prep 40-60h. Best after valuation/LBO phase.')
 add('Month 6 target: FRM Part I', ORANGE,
-    'Cost ~$850. Add 100h question practice after derivatives phase.', 1)
+    'Cost ~$850. Add 100h question practice after derivatives phase.')
 add('Month 9 target: no credential', GREEN,
-    'Focus on portfolio build and case execution. Skill compounding over certificates.', 1)
+    'Focus on portfolio build and case execution. Skill compounding over certificates.')
 add('Month 12 target: CIPM or FRM Part II', ORANGE,
-    'Cost ~$1,000. Prep 100-150h after active PM capstone.', 1)
+    'Cost ~$1,000. Prep 100-150h after active PM capstone.')
 add('CFA sequencing note', GREEN,
-    'CFA is intentionally deferred. This roadmap first, then evaluate CFA necessity based on role requirements.', 1)
+    'CFA is intentionally deferred. This roadmap first, then evaluate CFA necessity based on role requirements.')
 
 # ===== Adjusted daily and weekly execution =====
 add('━━━ ADJUSTED DAILY STUDY SCHEDULE ━━━', GREEN,
     'Adjusted for consistency and retention with lower burnout risk.')
 add('Morning review block (6:30-7:00 AM)', GREEN,
-    'Spaced repetition only. Re-write formulas and definitions from memory.', 1)
+    'Spaced repetition only. Re-write formulas and definitions from memory.')
 add('Midday concept block (12:00-12:30 PM)', BLUE,
-    'Read new material while alert. No heavy problem solving in this block.', 1)
+    'Read new material while alert. No heavy problem solving in this block.')
 add('Evening build block (7:00-8:00 PM)', ORANGE,
-    'Problem sets, Excel builds, and Python implementation.', 1)
+    'Problem sets, Excel builds, and Python implementation.')
 add('One-block fallback option', GREEN,
-    'If day gets compressed, do one 90-minute block: 7:00-8:30 PM or 6:00-7:30 AM.', 1)
+    'If day gets compressed, do one 90-minute block: 7:00-8:30 PM or 6:00-7:30 AM.')
 add('Sleep/retention guardrail', RED,
-    'Avoid studying after 10 PM. Memory consolidation quality declines with late-night heavy study.', 1)
+    'Avoid studying after 10 PM. Memory consolidation quality declines with late-night heavy study.')
 
 add('━━━ WEEKLY TEMPLATE (PRINTABLE) ━━━', BLUE,
     'Repeat this cadence each week and only adjust workload, not structure.')
 add('Monday template', GREEN,
-    'Read chapter/subchapter (45m) + solve first 5 problems (45m).', 1)
+    'Read chapter/subchapter (45m) + solve first 5 problems (45m).')
 add('Tuesday template', GREEN,
-    'Remaining problems (45m) + Excel build (45m).', 1)
+    'Remaining problems (45m) + Excel build (45m).')
 add('Wednesday template', BLUE,
-    'Extend model with sensitivities (60m) + teach-back drill (30m).', 1)
+    'Extend model with sensitivities (60m) + teach-back drill (30m).')
 add('Thursday template', BLUE,
-    'Read next subsection (45m) + flashcards/recall drill (45m).', 1)
+    'Read next subsection (45m) + flashcards/recall drill (45m).')
 add('Friday template', ORANGE,
-    'Mixed problem set from prior chapters (90m).', 1)
+    'Mixed problem set from prior chapters (90m).')
 add('Saturday template', ORANGE,
-    '3-hour mini case build from scratch.', 1)
+    '3-hour mini case build from scratch.')
 add('Sunday template', GREEN,
-    'Off day or controlled catch-up only.', 1)
+    'Off day or controlled catch-up only.')
 
 # ===== Duration table converted into objectives =====
 add('━━━ PHASE DURATION TARGETS (REALISTIC) ━━━', BLUE,
     'Use this to pressure-test pacing and identify slippage early.')
-add('Phase 0 target', GREEN, '18h study, ~12 calendar days, ~2 weeks with buffer.', 1)
-add('Phase 1 target', BLUE, '65h study, ~43 days, ~6 weeks with review cadence.', 1)
-add('Phase 2 target', ORANGE, '90h study, ~60 days, ~8 weeks with modeling repetitions.', 1)
-add('Phase 3 target', ORANGE, '105h study, ~70 days, ~10 weeks including practice.', 1)
-add('Phase 4 target', GREEN, '45h study, ~30 days, ~6 weeks lighter conceptual phase.', 1)
-add('Phase 5 target', ORANGE, '90h study, ~60 days, ~8 weeks implementation-heavy.', 1)
-add('Program-level target', BLUE, '413 core hours, ~275 days, ~10.5 months with buffers.', 1)
+add('Phase 0 target', GREEN, '18h study, ~12 calendar days, ~2 weeks with buffer.')
+add('Phase 1 target', BLUE, '65h study, ~43 days, ~6 weeks with review cadence.')
+add('Phase 2 target', ORANGE, '90h study, ~60 days, ~8 weeks with modeling repetitions.')
+add('Phase 3 target', ORANGE, '105h study, ~70 days, ~10 weeks including practice.')
+add('Phase 4 target', GREEN, '45h study, ~30 days, ~6 weeks lighter conceptual phase.')
+add('Phase 5 target', ORANGE, '90h study, ~60 days, ~8 weeks implementation-heavy.')
+add('Program-level target', BLUE, '413 core hours, ~275 days, ~10.5 months with buffers.')
 
 # ===== Today action pack =====
 add('━━━ TODAY\'S ACTION PACK (START DAY) ━━━', RED,
     'Immediate execution plan for Day 1 to break inertia and establish momentum.')
 add('Morning action', GREEN,
-    'Write portfolio variance formula from memory and explain each term aloud.', 1)
+    'Write portfolio variance formula from memory and explain each term aloud.')
 add('Midday action', BLUE,
-    'Open Excel and load 60 daily returns for AAPL and GLD.', 1)
+    'Open Excel and load 60 daily returns for AAPL and GLD.')
 add('Evening action', RED,
-    'Compute variance(AAPL), variance(GLD), covariance, and portfolio variance at w=(0.5,0.5). Then solve minimum-variance weight.', 1)
+    'Compute variance(AAPL), variance(GLD), covariance, and portfolio variance at w=(0.5,0.5). Then solve minimum-variance weight.')
 add('Minimum variance formula objective', ORANGE,
-    'w_min = (sigma2^2 - Cov) / (sigma1^2 + sigma2^2 - 2*Cov). Verify numerically in Excel.', 1)
+    'w_min = (sigma2^2 - Cov) / (sigma1^2 + sigma2^2 - 2*Cov). Verify numerically in Excel.')
 add('Execution standard', GREEN,
-    'If completed today, you are ahead of most students because you moved from reading to quant execution.', 1)
+    'If completed today, you are ahead of most students because you moved from reading to quant execution.')
 
 conn.commit()
 total = conn.execute("SELECT COUNT(*) FROM custom_items WHERE section_key=?", (SK,)).fetchone()[0]
