@@ -1,0 +1,1900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Life Optimization</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface2: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+  --green: #3fb950;
+  --blue: #58a6ff;
+  --orange: #d29922;
+  --red: #f85149;
+  --accent: #58a6ff;
+  --radius: 8px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Layout */
+.app { display: flex; min-height: 100vh; }
+.sidebar { width: 220px; background: var(--surface); border-right: 1px solid var(--border); padding: 20px 0; flex-shrink: 0; position: fixed; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; }
+.main { margin-left: 220px; flex: 1; padding: 32px 40px; max-width: 1100px; }
+
+/* Sidebar */
+.sidebar h1 { font-size: 15px; padding: 0 20px 20px; color: var(--text); font-weight: 600; letter-spacing: -0.3px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.sidebar h1 span { display: block; font-size: 11px; color: var(--text-muted); font-weight: 400; margin-top: 2px; }
+.nav-item { display: flex; align-items: center; padding: 8px 20px; font-size: 14px; color: var(--text-muted); cursor: pointer; transition: all 0.15s; border-left: 3px solid transparent; }
+.nav-item:hover { color: var(--text); background: var(--surface2); }
+.nav-item.active { color: var(--text); background: var(--surface2); border-left-color: var(--accent); }
+.nav-item .nav-label { flex: 1; }
+.nav-item .nav-remove { display: none; font-size: 14px; color: var(--text-muted); padding: 0 2px; line-height: 1; cursor: pointer; border-radius: 3px; }
+.nav-item .nav-remove:hover { color: var(--red); background: rgba(248,81,73,0.15); }
+.nav-item:hover .nav-remove { display: block; }
+.nav-item .nav-drag { display: none; font-size: 12px; color: var(--text-muted); cursor: grab; padding: 0 2px; line-height: 1; user-select: none; }
+.nav-item:hover .nav-drag { display: block; }
+.nav-item.dragging { opacity: 0.4; }
+.nav-item.drag-over { border-top: 2px solid var(--accent); margin-top: -2px; }
+.nav-section.drag-over-group { border-bottom: 2px solid var(--accent); }
+.nav-schedule-icon { font-size: 13px; margin-right: 4px; flex-shrink: 0; opacity: 0.7; }
+.nav-item .nav-schedule-toggle { display: none; font-size: 11px; color: var(--text-muted); cursor: pointer; padding: 0 3px; line-height: 1; border-radius: 3px; margin-right: 2px; }
+.nav-item .nav-schedule-toggle:hover { color: var(--accent); background: rgba(88,166,255,0.15); }
+.nav-item:hover .nav-schedule-toggle { display: block; }
+.nav-section { font-size: 11px; text-transform: uppercase; color: var(--text-muted); padding: 16px 20px 6px; letter-spacing: 0.5px; font-weight: 600; display: flex; align-items: center; }
+.nav-section .nav-label { flex: 1; }
+.nav-section .nav-add { display: none; font-size: 16px; color: var(--text-muted); cursor: pointer; padding: 0 2px; line-height: 1; border-radius: 3px; }
+.nav-section .nav-add:hover { color: var(--green); }
+.nav-section:hover .nav-add { display: block; }
+.sidebar-footer { padding: 12px 20px; border-top: 1px solid var(--border); margin-top: auto; }
+.sidebar-add-section { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); cursor: pointer; padding: 6px 0; transition: color 0.15s; }
+.sidebar-add-section:hover { color: var(--accent); }
+#sidebar-nav { flex: 1; }
+
+/* Header */
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.page-header h2 { font-size: 24px; font-weight: 600; }
+
+/* Status dots */
+.status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; flex-shrink: 0; }
+.status-dot.green { background: var(--green); }
+.status-dot.blue { background: var(--blue); }
+.status-dot.orange { background: var(--orange); }
+.status-dot.red { background: var(--red); }
+
+/* Legend */
+.legend { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; font-size: 12px; color: var(--text-muted); }
+
+/* Cards */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+.card h3 { font-size: 16px; margin-bottom: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.card-subtitle { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+
+/* Tables */
+.item-list { list-style: none; }
+.item-row { display: flex; align-items: center; padding: 10px 12px; border-radius: 6px; margin-bottom: 2px; transition: background 0.15s; gap: 12px; }
+.item-row:hover { background: var(--surface2); }
+.item-name { flex: 1; font-size: 14px; }
+.item-category { font-size: 12px; color: var(--text-muted); min-width: 100px; }
+.item-link { font-size: 12px; }
+.item-actions { display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s; }
+.item-row:hover .item-actions { opacity: 1; }
+
+/* Buttons */
+.btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 13px; cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
+.btn:hover { background: var(--border); }
+.btn-primary { background: #238636; border-color: #2ea043; }
+.btn-primary:hover { background: #2ea043; }
+.btn-danger { color: var(--red); }
+.btn-danger:hover { background: rgba(248,81,73,0.15); }
+.btn-sm { padding: 4px 8px; font-size: 12px; }
+.btn-icon { padding: 4px 6px; background: transparent; border: none; color: var(--text-muted); font-size: 16px; }
+.btn-icon:hover { color: var(--text); }
+
+/* Modal */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; display: none; align-items: center; justify-content: center; }
+.modal-overlay.open { display: flex; }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 480px; max-width: 90vw; max-height: 85vh; overflow-y: auto; }
+.modal h3 { font-size: 18px; margin-bottom: 16px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+/* Forms */
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
+.form-group input, .form-group select, .form-group textarea {
+  width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font-size: 14px; font-family: inherit;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(88,166,255,0.2);
+}
+.form-group textarea { min-height: 80px; resize: vertical; }
+.form-row { display: flex; gap: 12px; }
+.form-row .form-group { flex: 1; }
+
+/* Routine sections */
+.routine-section { margin-bottom: 24px; }
+.routine-title { font-size: 14px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.step-number { font-size: 12px; color: var(--text-muted); min-width: 24px; text-align: center; }
+
+/* Goals */
+.goal-row { display: flex; align-items: flex-start; padding: 12px; border-radius: 6px; margin-bottom: 4px; gap: 12px; }
+.goal-row:hover { background: var(--surface2); }
+.goal-checkbox { width: 18px; height: 18px; border-radius: 4px; border: 2px solid var(--border); cursor: pointer; flex-shrink: 0; margin-top: 2px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+.goal-checkbox.checked { background: var(--green); border-color: var(--green); }
+.goal-checkbox.checked::after { content: '✓'; color: #fff; font-size: 12px; font-weight: 700; }
+.goal-title { font-size: 14px; flex: 1; }
+.goal-title.completed { text-decoration: line-through; color: var(--text-muted); }
+.goal-meta { font-size: 12px; color: var(--text-muted); }
+.priority-high { color: var(--red); }
+.priority-med { color: var(--orange); }
+.priority-low { color: var(--text-muted); }
+
+/* Custom items with notes */
+.custom-item { margin-bottom: 4px; cursor: grab; }
+.custom-item[draggable] { transition: opacity 0.15s, border-color 0.15s; }
+.custom-item.dragging-item { opacity: 0.4; }
+.custom-item.drag-over-item { border-top: 2px solid var(--accent); }
+.drag-handle-item { cursor: grab; color: var(--text-muted); font-size: 14px; opacity: 0.3; margin-right: 2px; }
+.drag-handle-item:hover { opacity: 0.8; }
+.item-notes { font-size: 13px; color: var(--text-muted); padding: 4px 12px 10px 28px; line-height: 1.6; }
+.task-badge { display: inline-block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(88,166,255,0.15); color: var(--blue); padding: 1px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle; }
+.qo-badge { background: rgba(163,113,247,0.15); color: var(--purple, #a371f7); }
+.qo-badge-sm { display: inline-block; font-size: 9px; font-weight: 600; background: rgba(163,113,247,0.15); color: var(--purple, #a371f7); padding: 0 4px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
+.schedule-task-qo { border-left: 2px solid var(--purple, #a371f7); }
+.task-schedule { font-size: 12px; color: var(--accent); padding: 2px 12px 4px 28px; }
+
+/* Schedule view */
+.schedule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.schedule-column { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.schedule-column-header { padding: 14px 16px; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.schedule-column-header .col-count { font-size: 11px; font-weight: 400; color: var(--text-muted); background: var(--surface2); padding: 1px 7px; border-radius: 10px; }
+.schedule-task { display: flex; align-items: center; padding: 10px 16px; gap: 10px; border-bottom: 1px solid var(--border); transition: background 0.15s; }
+.schedule-task:last-child { border-bottom: none; }
+.schedule-task:hover { background: var(--surface2); }
+.schedule-task-info { flex: 1; min-width: 0; }
+.schedule-task-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.schedule-task-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.schedule-task-time { font-size: 12px; color: var(--accent); white-space: nowrap; }
+.schedule-task-section { font-size: 11px; color: var(--text-muted); background: var(--surface2); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+.schedule-empty { padding: 20px 16px; color: var(--text-muted); font-size: 13px; text-align: center; }
+.schedule-subgroup-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 16px 4px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+.schedule-subgroup-header .subgroup-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.schedule-column > .schedule-subgroup-header:first-child, .schedule-column > .schedule-column-header + .schedule-subgroup-header { border-top: none; }
+.schedule-tabs { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
+.schedule-tab { padding: 6px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); transition: all 0.15s; }
+.schedule-tab:hover { color: var(--text); background: var(--surface2); }
+.schedule-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* Timeline view */
+.timeline-list { padding: 0 4px; }
+
+/* Week Overview */
+.week-carousel { display: flex; align-items: stretch; gap: 0; }
+.week-arrow { background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); font-size: 22px; cursor: pointer; padding: 0 14px; border-radius: 10px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }
+.week-arrow:hover { background: var(--surface2); color: var(--text); border-color: var(--accent); }
+.week-arrow:disabled { opacity: 0.3; cursor: default; border-color: var(--border); color: var(--text-muted); background: var(--surface); }
+.week-overview { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; flex: 1; min-width: 0; margin: 0 10px; }
+@media (max-width: 800px) { .week-overview { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 500px) { .week-overview { grid-template-columns: 1fr; } }
+.week-nav-dots { display: flex; justify-content: center; gap: 6px; margin-top: 12px; }
+.week-nav-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); cursor: pointer; transition: background 0.15s; }
+.week-nav-dot.active { background: var(--accent); }
+.week-nav-dot:hover { background: var(--text-muted); }
+.week-day-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+.week-day-card.week-day-today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.week-day-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px 6px; }
+.week-day-name { font-weight: 600; font-size: 14px; }
+.week-today-badge { background: var(--accent); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
+.week-day-progress { font-size: 11px; color: var(--text-muted); }
+.week-pct { font-weight: 600; color: var(--accent); }
+.week-day-bar { height: 3px; background: var(--border); margin: 0 12px 4px; border-radius: 2px; }
+.week-day-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s; }
+.week-day-tasks { flex: 1; overflow-y: auto; max-height: 420px; padding: 2px 0 6px; }
+.week-subgroup-header { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 6px 12px 2px; display: flex; align-items: center; gap: 4px; }
+.week-subgroup-header .subgroup-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.week-task-row { display: flex; align-items: center; gap: 6px; padding: 3px 12px; cursor: pointer; font-size: 12px; transition: background 0.1s; }
+.week-task-row:hover { background: var(--surface2); }
+.week-task-row input[type="checkbox"] { accent-color: var(--accent); flex-shrink: 0; width: 14px; height: 14px; cursor: pointer; }
+.week-task-time { color: var(--text-muted); font-size: 11px; min-width: 52px; flex-shrink: 0; }
+.week-task-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.week-task-done .week-task-name { text-decoration: line-through; color: var(--text-muted); }
+.week-task-done .week-task-time { color: var(--text-muted); opacity: 0.5; }
+.week-task-current { background: rgba(88,166,255,0.1); border-left: 3px solid var(--accent); padding-left: 9px; }
+.week-task-current .week-task-name { font-weight: 600; color: var(--accent); }
+.week-task-next { background: rgba(163,113,247,0.06); border-left: 3px solid var(--purple, #a371f7); padding-left: 9px; }
+.week-task-past:not(.week-task-done) { opacity: 0.45; }
+.week-now-indicator { font-size: 9px; font-weight: 700; background: var(--accent); color: #fff; padding: 0 5px; border-radius: 4px; margin-left: auto; flex-shrink: 0; }
+.week-next-indicator { font-size: 9px; font-weight: 700; background: var(--purple, #a371f7); color: #fff; padding: 0 5px; border-radius: 4px; margin-left: auto; flex-shrink: 0; }
+.live-clock-box { text-align: right; }
+.live-clock { font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.live-date { font-size: 13px; color: var(--text-muted); }
+.tz-btn { font-size: 16px; opacity: 0.5; transition: opacity 0.15s; }
+.tz-btn:hover { opacity: 1; }
+.timeline-row { display: flex; gap: 12px; min-height: 48px; }
+.timeline-time { width: 70px; flex-shrink: 0; font-size: 12px; color: var(--accent); text-align: right; padding-top: 2px; font-weight: 500; }
+.timeline-dot-col { display: flex; flex-direction: column; align-items: center; width: 16px; flex-shrink: 0; }
+.timeline-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+.timeline-line { width: 2px; flex: 1; background: var(--border); margin: 2px 0; }
+.timeline-content { flex: 1; padding-bottom: 12px; }
+
+/* Timeline current-time indicators */
+.tl-past { opacity: 0.35; }
+.tl-past .timeline-time { color: var(--text-muted); }
+.tl-current { opacity: 1; }
+.tl-current .timeline-time { color: var(--accent); font-weight: 700; font-size: 13px; }
+.tl-current .schedule-task-name { font-weight: 700; color: var(--accent); }
+.tl-dot-glow { width: 14px; height: 14px; margin-top: 2px; box-shadow: 0 0 8px 3px rgba(88,166,255,0.6), 0 0 20px 6px rgba(88,166,255,0.25); animation: dotPulse 2s ease-in-out infinite; }
+.tl-line-glow { background: var(--accent); box-shadow: 0 0 6px 1px rgba(88,166,255,0.4); }
+.tl-next .schedule-task-name { color: var(--purple, #a371f7); }
+@keyframes dotPulse { 0%, 100% { box-shadow: 0 0 8px 3px rgba(88,166,255,0.6), 0 0 20px 6px rgba(88,166,255,0.25); } 50% { box-shadow: 0 0 12px 5px rgba(88,166,255,0.8), 0 0 28px 10px rgba(88,166,255,0.35); } }
+
+/* Timeline carousel */
+.tl-carousel-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; flex: 1; min-width: 0; margin: 0 10px; }
+@media (max-width: 900px) { .tl-carousel-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 550px) { .tl-carousel-grid { grid-template-columns: 1fr; } }
+.tl-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; overflow-y: auto; max-height: 600px; }
+.tl-card-today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* Horizontal timeline */
+.htl-scroll { overflow-x: auto; padding: 4px 0 16px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.htl-scroll::-webkit-scrollbar { height: 6px; }
+.htl-scroll::-webkit-scrollbar-track { background: transparent; }
+.htl-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.htl-track { display: flex; align-items: center; min-width: max-content; padding: 12px 8px; position: relative; }
+.htl-node { display: flex; flex-direction: column; align-items: center; position: relative; flex-shrink: 0; }
+.htl-card { width: 130px; padding: 14px 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); text-align: center; transition: all 0.2s ease; position: relative; overflow: hidden; }
+.htl-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 12px 12px 0 0; background: var(--sg-color, var(--border)); transition: background 0.2s; }
+.htl-card:hover { border-color: var(--text-muted); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+.htl-rail { display: flex; align-items: center; width: 36px; flex-shrink: 0; position: relative; }
+.htl-rail-line { width: 100%; height: 2px; background: var(--border); }
+.htl-rail-glow .htl-rail-line { background: linear-gradient(90deg, var(--accent), var(--border)); height: 2px; box-shadow: 0 0 6px rgba(88,166,255,0.3); }
+.htl-dot-wrap { display: flex; justify-content: center; margin: 10px 0 8px; position: relative; z-index: 1; }
+.htl-time { font-size: 11px; color: var(--text-muted); font-weight: 600; margin-bottom: 4px; letter-spacing: 0.3px; }
+.htl-name { font-size: 12.5px; font-weight: 500; line-height: 1.35; word-break: break-word; color: var(--text); }
+.htl-badge { margin-top: 6px; }
+.htl-notes { font-size: 10px; color: var(--text-muted); margin-top: 6px; line-height: 1.3; opacity: 0.8; }
+/* States */
+.htl-past .htl-card { opacity: 0.4; border-color: var(--border); }
+.htl-past .htl-rail-line { background: var(--text-muted); opacity: 0.3; }
+.htl-active .htl-card { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 20px rgba(88,166,255,0.15), 0 4px 16px rgba(0,0,0,0.3); transform: translateY(-3px); }
+.htl-active .htl-card::before { background: var(--accent); height: 4px; }
+.htl-active .htl-time { color: var(--accent); }
+.htl-active .htl-name { color: var(--accent); font-weight: 700; }
+.htl-upcoming .htl-card { border-color: rgba(163,113,247,0.5); background: rgba(163,113,247,0.04); }
+.htl-upcoming .htl-time { color: #a371f7; }
+.htl-future .htl-card { opacity: 0.85; }
+.htl-sg { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; opacity: 0.8; }
+/* Early complete */
+.htl-complete-btn { margin-top: 8px; font-size: 10px; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--green); color: var(--green); background: transparent; cursor: pointer; transition: all 0.15s; font-weight: 600; letter-spacing: 0.3px; }
+.htl-complete-btn:hover { background: var(--green); color: var(--bg); }
+.htl-done .htl-card { border-color: var(--green); opacity: 0.55; }
+.htl-done .htl-card::before { background: var(--green) !important; }
+.htl-done .htl-name { text-decoration: line-through; opacity: 0.7; }
+/* Downtime rail */
+.htl-rail-downtime { width: 110px; display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0; gap: 4px; }
+.htl-rail-downtime .htl-rail-line-red { width: 100%; height: 3px; background: var(--red); border-radius: 2px; box-shadow: 0 0 8px rgba(248,81,73,0.4); animation: downtimePulse 2s ease-in-out infinite; }
+@keyframes downtimePulse { 0%,100% { box-shadow: 0 0 8px rgba(248,81,73,0.4); } 50% { box-shadow: 0 0 14px rgba(248,81,73,0.7); } }
+.htl-downtime-info { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.htl-downtime-label { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--red); }
+.htl-downtime-timer { font-size: 14px; font-weight: 700; color: var(--red); font-variant-numeric: tabular-nums; }
+.htl-skip-btn { font-size: 9px; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--text-muted); color: var(--text-muted); background: transparent; cursor: pointer; transition: all 0.15s; font-weight: 600; }
+.htl-skip-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(88,166,255,0.08); }
+
+/* Dashboard */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+.stat-value { font-size: 32px; font-weight: 700; }
+.stat-label { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+/* Empty state */
+.empty-state { text-align: center; padding: 40px; color: var(--text-muted); font-size: 14px; }
+
+/* Toast */
+.toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; font-size: 14px; z-index: 200; transform: translateY(100px); opacity: 0; transition: all 0.3s; }
+.toast.show { transform: translateY(0); opacity: 1; }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="sidebar" id="sidebar">
+    <h1>Life Optimization <span>Dashboard</span></h1>
+    <div id="sidebar-nav"></div>
+    <div class="sidebar-footer">
+      <div class="sidebar-add-section" onclick="openAddSectionModal()">+ Add Section</div>
+    </div>
+  </nav>
+
+  <div class="main" id="content"></div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal"></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ──
+let statuses = [];
+let fashionCategories = [];
+let skincareRoutines = [];
+let lifeAreas = [];
+let sidebarSections = [];
+let currentPage = 'dashboard';
+
+// ── API helpers ──
+async function api(url, opts = {}) {
+  if (opts.body && typeof opts.body === 'object') {
+    opts.headers = { 'Content-Type': 'application/json', ...opts.headers };
+    opts.body = JSON.stringify(opts.body);
+  }
+  const res = await fetch('/api/' + url, opts);
+  return res.json();
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+function statusDot(color) {
+  return `<span class="status-dot ${color}"></span>`;
+}
+
+const subgroupColors = {
+  morning: '#f0883e',
+  midday: '#d29922',
+  afternoon: '#58a6ff',
+  evening: '#a371f7',
+  night: '#8b949e',
+};
+function subgroupColor(name) {
+  if (!name) return 'var(--text-muted)';
+  return subgroupColors[name.toLowerCase()] || '#8b949e';
+}
+function subgroupHeader(label) {
+  if (!label) return '';
+  const col = subgroupColor(label);
+  return `<div class="schedule-subgroup-header" style="color:${col}"><span class="subgroup-dot" style="background:${col}"></span>${esc(label)}</div>`;
+}
+
+function statusSelect(selectedId, name = 'status_id') {
+  return `<select name="${name}">${statuses.map(s =>
+    `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.color} — ${s.name}</option>`
+  ).join('')}</select>`;
+}
+
+// ── Modal ──
+function openModal(html) {
+  document.getElementById('modal').innerHTML = html;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+function getFormData(formId) {
+  const form = document.getElementById(formId);
+  const data = {};
+  for (const el of form.elements) {
+    if (!el.name) continue;
+    if (el.type === 'number') data[el.name] = el.value ? Number(el.value) : null;
+    else data[el.name] = el.value || null;
+  }
+  return data;
+}
+
+// ── Navigation ──
+function buildSidebar() {
+  const nav = document.getElementById('sidebar-nav');
+  const groups = {};
+  sidebarSections.forEach(s => {
+    if (!groups[s.group_name]) groups[s.group_name] = [];
+    groups[s.group_name].push(s);
+  });
+  let html = '';
+  Object.entries(groups).forEach(([group, items]) => {
+    html += `<div class="nav-section">
+      <span class="nav-label">${esc(group)}</span>
+      <span class="nav-add" onclick="openAddItemToGroupModal('${esc(group)}')" title="Add page to ${esc(group)}">+</span>
+    </div>`;
+    items.forEach(s => {
+      const removeBtn = s.page_key === 'dashboard' ? '' :
+        `<span class="nav-remove" onclick="event.stopPropagation(); removeSidebarSection(${s.id}, '${esc(s.label)}', '${esc(s.page_key)}')" title="Remove">✕</span>`;
+      const scheduleIcon = s.is_schedule ? '<span class="nav-schedule-icon" title="Schedule">📅</span>' : '';
+      const scheduleToggle = s.page_key === 'dashboard' ? '' :
+        `<span class="nav-schedule-toggle" onclick="event.stopPropagation(); toggleSchedule(${s.id})" title="${s.is_schedule ? 'Unmark as schedule' : 'Mark as schedule'}">${s.is_schedule ? '📅' : '🗓'}</span>`;
+      html += `<div class="nav-item ${s.page_key === currentPage ? 'active' : ''}" data-page="${esc(s.page_key)}" data-id="${s.id}" draggable="true" onclick="navigateTo('${esc(s.page_key)}')" ondragstart="onSidebarDragStart(event)" ondragover="onSidebarDragOver(event)" ondrop="onSidebarDrop(event)" ondragend="onSidebarDragEnd(event)">
+        <span class="nav-drag" title="Drag to reorder">⠿</span>
+        ${scheduleIcon}
+        <span class="nav-label">${esc(s.label)}</span>
+        ${scheduleToggle}
+        ${removeBtn}
+      </div>`;
+    });
+  });
+  nav.innerHTML = html;
+}
+
+function navigateTo(page) {
+  currentPage = page;
+  buildSidebar();
+  loadPage(page);
+}
+
+// ── Sidebar Drag & Drop ──
+let draggedSectionId = null;
+
+function onSidebarDragStart(e) {
+  draggedSectionId = e.currentTarget.dataset.id;
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function onSidebarDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const target = e.currentTarget;
+  if (target.dataset.id !== draggedSectionId) {
+    // Clear other drag-over indicators
+    document.querySelectorAll('.nav-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+    target.classList.add('drag-over');
+  }
+}
+
+function onSidebarDrop(e) {
+  e.preventDefault();
+  const targetId = e.currentTarget.dataset.id;
+  if (!draggedSectionId || draggedSectionId === targetId) return;
+  // Reorder: move dragged item before the target
+  const items = document.querySelectorAll('.nav-item[data-id]');
+  const order = [];
+  items.forEach(el => {
+    const id = el.dataset.id;
+    if (id === draggedSectionId) return; // skip dragged, will insert at target
+    if (id === targetId) order.push(draggedSectionId);
+    order.push(id);
+  });
+  saveSidebarOrder(order.map(Number));
+}
+
+function onSidebarDragEnd(e) {
+  draggedSectionId = null;
+  document.querySelectorAll('.nav-item.dragging, .nav-item.drag-over').forEach(el => {
+    el.classList.remove('dragging', 'drag-over');
+  });
+}
+
+async function saveSidebarOrder(order) {
+  await api('sidebar/reorder', { method: 'PUT', body: { order } });
+  sidebarSections = await api('sidebar');
+  buildSidebar();
+}
+
+// ── Pages ──
+async function loadPage(page) {
+  const c = document.getElementById('content');
+  switch (page) {
+    case 'dashboard': return renderDashboard(c);
+    case 'purchases': return renderPurchases(c);
+    case 'fashion': return renderFashion(c);
+    case 'skincare': return renderSkincare(c);
+    case 'pharmacology': return renderPharmacology(c);
+    case 'goals': return renderGoals(c);
+    case 'schedule': return renderSchedule(c);
+    default:
+      if (page.startsWith('custom_')) return renderCustomSection(c, page);
+  }
+}
+
+// ── Sidebar Management ──
+function openAddSectionModal() {
+  const existingGroups = [...new Set(sidebarSections.map(s => s.group_name))];
+  openModal(`
+    <h3>Add Section</h3>
+    <form id="section-form">
+      <div class="form-group">
+        <label>Group</label>
+        <select name="group_name" id="section-group-select" onchange="toggleNewGroupInput()">
+          ${existingGroups.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('')}
+          <option value="__new__">+ New Group...</option>
+        </select>
+      </div>
+      <div class="form-group" id="new-group-input" style="display:none">
+        <label>New Group Name</label>
+        <input name="new_group_name" placeholder="e.g. Health, Finance...">
+      </div>
+      <div class="form-group">
+        <label>Section Name</label>
+        <input name="label" placeholder="e.g. Supplements, Budget..." required>
+      </div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSection()">Add</button>
+    </div>`);
+}
+
+function openAddItemToGroupModal(groupName) {
+  openModal(`
+    <h3>Add Section to ${esc(groupName)}</h3>
+    <form id="section-form">
+      <input type="hidden" name="group_name" value="${esc(groupName)}">
+      <div class="form-group">
+        <label>Section Name</label>
+        <input name="label" placeholder="e.g. Supplements, Budget..." required>
+      </div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSection()">Add</button>
+    </div>`);
+}
+
+function toggleNewGroupInput() {
+  const sel = document.getElementById('section-group-select');
+  document.getElementById('new-group-input').style.display = sel.value === '__new__' ? 'block' : 'none';
+}
+
+async function saveSection() {
+  const data = getFormData('section-form');
+  let group = data.group_name;
+  if (group === '__new__') {
+    group = data.new_group_name;
+    if (!group || !group.trim()) { toast('Enter a group name'); return; }
+  }
+  if (!data.label || !data.label.trim()) { toast('Enter a section name'); return; }
+  const res = await api('sidebar', { method: 'POST', body: { group_name: group.trim(), label: data.label.trim() } });
+  if (res.error) { toast(res.error); return; }
+  closeModal();
+  toast('Section added');
+  sidebarSections = await api('sidebar');
+  buildSidebar();
+  navigateTo(res.page_key);
+}
+
+async function removeSidebarSection(id, label, pageKey) {
+  if (!confirm('Remove "' + label + '" from the sidebar?')) return;
+  await api('sidebar/' + id, { method: 'DELETE' });
+  toast('"' + label + '" removed');
+  sidebarSections = await api('sidebar');
+  if (currentPage === pageKey) {
+    currentPage = 'dashboard';
+  }
+  buildSidebar();
+  loadPage(currentPage);
+}
+
+async function toggleSchedule(id) {
+  const res = await api('sidebar/' + id + '/toggle-schedule', { method: 'PUT' });
+  if (res.error) { toast(res.error); return; }
+  sidebarSections = await api('sidebar');
+  buildSidebar();
+  toast(res.is_schedule ? 'Marked as schedule' : 'Unmarked as schedule');
+}
+
+// ── Custom Sections ──
+async function renderCustomSection(c, sectionKey) {
+  const section = sidebarSections.find(s => s.page_key === sectionKey);
+  const label = section ? section.label : sectionKey;
+  const items = await api('custom/' + sectionKey);
+
+  // Group items by section headers (names starting with ━━━)
+  const groups = [];
+  let current = { header: null, items: [] };
+  items.forEach(it => {
+    if (it.name.startsWith('━━━')) {
+      if (current.header || current.items.length) groups.push(current);
+      current = { header: it, items: [] };
+    } else {
+      current.items.push(it);
+    }
+  });
+  if (current.header || current.items.length) groups.push(current);
+
+  function renderNotes(notes) {
+    if (!notes) return '';
+    return `<div class="item-notes">${esc(notes).replace(/\n/g, '<br>')}</div>`;
+  }
+
+  function renderItem(it, sKey) {
+    const taskBadge = it.is_task ? (it.is_quick_objective ? `<span class="task-badge qo-badge">QO</span>` : `<span class="task-badge">Task</span>`) : '';
+    const taskInfo = it.is_task ? `<div class="task-schedule">${it.is_quick_objective ? '<em>anytime</em>' : esc(it.task_time || '')}${it.task_count ? ` · ${it.task_count}×` : ''}${it.task_interval ? ` ${esc(it.task_interval)}` : ''}${it.subgroup ? ` · ${esc(it.subgroup)}` : ''}</div>` : '';
+    const optimizeBtn = (it.is_task && !it.is_quick_objective) ? `<button class="btn-icon" onclick="event.stopPropagation(); optimizeTask('${esc(sKey)}', ${it.id})" title="Optimize within schedule">⏱</button>` : '';
+    return `<li class="custom-item" draggable="true" data-item-id="${it.id}"
+      ondragstart="onItemDragStart(event, ${it.id})"
+      ondragover="onItemDragOver(event)"
+      ondrop="onItemDrop(event, '${esc(sKey)}', ${it.id})"
+      ondragend="onItemDragEnd(event)">
+      <div class="item-row">
+        <span class="drag-handle-item" title="Drag to reorder">⠿</span>
+        ${statusDot(it.status_color)}
+        <span class="item-name">${esc(it.name)} ${taskBadge}</span>
+        ${it.link ? `<a href="${esc(it.link)}" target="_blank" class="item-link">Link</a>` : ''}
+        <div class="item-actions">
+          ${optimizeBtn}
+          <button class="btn-icon" onclick="openCustomItemModal('${esc(sKey)}', ${it.id})">✎</button>
+          <button class="btn-icon btn-danger" onclick="deleteCustomItem('${esc(sKey)}', ${it.id})">✕</button>
+        </div>
+      </div>
+      ${taskInfo}
+      ${renderNotes(it.notes)}
+    </li>`;
+  }
+
+  const hasGroups = groups.some(g => g.header);
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>${esc(label)}</h2>
+      <button class="btn btn-primary" onclick="openCustomItemModal('${esc(sectionKey)}')">+ Add Item</button>
+    </div>
+    <div class="legend">
+      <div class="legend-item">${statusDot('green')} Have / Current</div>
+      <div class="legend-item">${statusDot('blue')} Next Up</div>
+      <div class="legend-item">${statusDot('orange')} Eventual</div>
+      <div class="legend-item">${statusDot('red')} Action Needed</div>
+    </div>
+    ${hasGroups ? groups.map(g => `
+      <div class="card">
+        ${g.header ? `<h3>${esc(g.header.name.replace(/━/g, '').trim())}</h3>
+        ${g.header.notes ? `<div class="card-subtitle">${esc(g.header.notes)}</div>` : ''}` : ''}
+        <ul class="item-list">
+          ${g.items.map(it => renderItem(it, sectionKey)).join('')}
+          ${g.items.length === 0 && !g.header ? '<li class="item-row" style="color:var(--text-muted)">No items</li>' : ''}
+        </ul>
+      </div>
+    `).join('') : `
+      <div class="card">
+        <ul class="item-list">
+          ${items.map(it => renderItem(it, sectionKey)).join('')}
+        </ul>
+        ${items.length === 0 ? '<div class="empty-state">No items yet. Click + to add one.</div>' : ''}
+      </div>`}`;
+}
+
+async function openCustomItemModal(sectionKey, editId) {
+  let item = { status_id: 1, name: '', link: '', notes: '', sort_order: 0, is_task: 0, task_time: '', task_count: '', task_interval: '', subgroup: '', is_quick_objective: 0 };
+  if (editId) {
+    const items = await api('custom/' + sectionKey);
+    item = items.find(i => i.id === editId) || item;
+  }
+  // Collect existing subgroups for autocomplete
+  const allItems = editId ? await api('custom/' + sectionKey) : [];
+  const existingSubgroups = [...new Set(allItems.map(i => i.subgroup).filter(Boolean))];
+  openModal(`
+    <h3>${editId ? 'Edit' : 'Add'} Item</h3>
+    <form id="custom-form">
+      <div class="form-row">
+        <div class="form-group"><label>Name</label><input name="name" value="${esc(item.name || '')}" required></div>
+        <div class="form-group"><label>Status</label>${statusSelect(item.status_id)}</div>
+      </div>
+      <div class="form-group"><label>Link</label><input name="link" value="${esc(item.link || '')}"></div>
+      <div class="form-group"><label>Notes</label><textarea name="notes">${esc(item.notes || '')}</textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label>Sort Order</label><input type="number" name="sort_order" value="${item.sort_order || 0}"></div>
+        <div class="form-group"><label>Subgroup</label><input name="subgroup" value="${esc(item.subgroup || '')}" placeholder="e.g. Morning, Afternoon, Evening" list="subgroup-list"><datalist id="subgroup-list">${existingSubgroups.map(s => `<option value="${esc(s)}">`).join('')}</datalist></div>
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" id="is-task-check" name="is_task" value="1" ${item.is_task ? 'checked' : ''} onchange="toggleTaskFields()"> This is a task</label>
+      </div>
+      <div id="task-fields" style="display:${item.is_task ? 'block' : 'none'}">
+        <div class="form-group">
+          <label><input type="checkbox" id="is-qo-check" name="is_quick_objective" value="1" ${item.is_quick_objective ? 'checked' : ''} onchange="toggleQOFields()"> Quick objective <span style="color:var(--text-muted);font-size:12px">(no fixed time)</span></label>
+        </div>
+        <div id="time-fields" style="display:${item.is_quick_objective ? 'none' : 'block'}">
+        <div class="form-row">
+          <div class="form-group"><label>When (time/schedule)</label><input name="task_time" value="${esc(item.task_time || '')}" placeholder="e.g. 8:00 AM, Morning, Mon/Wed/Fri"></div>
+          ${editId ? `<div class="form-group" style="display:flex;align-items:flex-end"><button type="button" class="btn" onclick="optimizeTaskFromModal('${esc(sectionKey)}', ${editId})" style="white-space:nowrap">⏱ Auto-place</button></div>` : ''}
+        </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>How many times</label><input type="number" name="task_count" value="${item.task_count || ''}" placeholder="e.g. 3" min="1"></div>
+          <div class="form-group"><label>Interval</label>
+            <select name="task_interval">
+              <option value="" ${!item.task_interval ? 'selected' : ''}>—</option>
+              <option value="daily" ${item.task_interval === 'daily' ? 'selected' : ''}>Daily</option>
+              <option value="every other day" ${item.task_interval === 'every other day' ? 'selected' : ''}>Every Other Day</option>
+              <option value="weekly" ${item.task_interval === 'weekly' ? 'selected' : ''}>Weekly</option>
+              <option value="biweekly" ${item.task_interval === 'biweekly' ? 'selected' : ''}>Biweekly</option>
+              <option value="monthly" ${item.task_interval === 'monthly' ? 'selected' : ''}>Monthly</option>
+              <option value="as needed" ${item.task_interval === 'as needed' ? 'selected' : ''}>As Needed</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCustomItem('${esc(sectionKey)}', ${editId || 'null'})">Save</button>
+    </div>`);
+}
+
+function toggleTaskFields() {
+  const checked = document.getElementById('is-task-check').checked;
+  document.getElementById('task-fields').style.display = checked ? 'block' : 'none';
+}
+
+function toggleQOFields() {
+  const checked = document.getElementById('is-qo-check').checked;
+  document.getElementById('time-fields').style.display = checked ? 'none' : 'block';
+}
+
+async function saveCustomItem(sectionKey, id) {
+  const data = getFormData('custom-form');
+  data.status_id = Number(data.status_id);
+  data.sort_order = Number(data.sort_order) || 0;
+  const isTaskCheck = document.getElementById('is-task-check');
+  data.is_task = isTaskCheck && isTaskCheck.checked ? 1 : 0;
+  const isQOCheck = document.getElementById('is-qo-check');
+  data.is_quick_objective = (isQOCheck && isQOCheck.checked) ? 1 : 0;
+  if (!data.is_task) {
+    data.task_time = null;
+    data.task_count = null;
+    data.task_interval = null;
+    data.is_quick_objective = 0;
+  } else {
+    if (data.is_quick_objective) data.task_time = null;
+    data.task_count = data.task_count ? Number(data.task_count) : null;
+    data.task_interval = data.task_interval || null;
+  }
+  data.subgroup = data.subgroup || null;
+  if (id) await api('custom/' + sectionKey + '/' + id, { method: 'PUT', body: data });
+  else await api('custom/' + sectionKey, { method: 'POST', body: data });
+  closeModal();
+  toast(id ? 'Item updated' : 'Item added');
+  loadPage(sectionKey);
+}
+
+async function deleteCustomItem(sectionKey, id) {
+  if (!confirm('Delete this item?')) return;
+  await api('custom/' + sectionKey + '/' + id, { method: 'DELETE' });
+  toast('Item deleted');
+  loadPage(sectionKey);
+}
+
+// ── Item drag-to-reorder ──
+let dragItemId = null;
+function onItemDragStart(e, id) {
+  dragItemId = id;
+  e.target.closest('.custom-item').classList.add('dragging-item');
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onItemDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const li = e.target.closest('.custom-item');
+  if (li) {
+    document.querySelectorAll('.custom-item.drag-over-item').forEach(el => el.classList.remove('drag-over-item'));
+    li.classList.add('drag-over-item');
+  }
+}
+function onItemDragEnd(e) {
+  dragItemId = null;
+  document.querySelectorAll('.dragging-item, .drag-over-item').forEach(el => {
+    el.classList.remove('dragging-item', 'drag-over-item');
+  });
+}
+async function onItemDrop(e, sectionKey, targetId) {
+  e.preventDefault();
+  if (!dragItemId || dragItemId === targetId) { onItemDragEnd(e); return; }
+  // Get all items in DOM order, reorder
+  const list = e.target.closest('.item-list');
+  if (!list) { onItemDragEnd(e); return; }
+  const ids = [...list.querySelectorAll('.custom-item[data-item-id]')].map(el => Number(el.dataset.itemId));
+  const fromIdx = ids.indexOf(dragItemId);
+  const toIdx = ids.indexOf(targetId);
+  if (fromIdx < 0 || toIdx < 0) { onItemDragEnd(e); return; }
+  ids.splice(fromIdx, 1);
+  ids.splice(toIdx, 0, dragItemId);
+  onItemDragEnd(e);
+  await api('custom/' + sectionKey + '/reorder', { method: 'PUT', body: { order: ids } });
+  loadPage(currentPage);
+}
+
+async function optimizeTask(sectionKey, id) {
+  const res = await api('custom/' + sectionKey + '/' + id + '/optimize', { method: 'PUT' });
+  if (res.error) { toast(res.error); return; }
+  toast('Placed at ' + res.task_time + ' (' + res.subgroup + ')');
+  loadPage(currentPage);
+}
+
+async function optimizeTaskFromModal(sectionKey, id) {
+  const res = await api('custom/' + sectionKey + '/' + id + '/optimize', { method: 'PUT' });
+  if (res.error) { toast(res.error); return; }
+  toast('Placed at ' + res.task_time + ' (' + res.subgroup + ')');
+  closeModal();
+  loadPage(currentPage);
+}
+
+// ── Dashboard ──
+async function renderDashboard(c) {
+  const [fashion, skincare, pharma, goals, purchases] = await Promise.all([
+    api('fashion'), api('skincare'), api('pharmacology'), api('goals'), api('purchases')
+  ]);
+  const owned = purchases.filter(p => p.status_color === 'green').length;
+  const toBuy = purchases.filter(p => p.status_color === 'blue').length;
+  const eventual = purchases.filter(p => p.status_color === 'orange').length;
+  const replace = purchases.filter(p => p.status_color === 'red').length;
+
+  c.innerHTML = `
+    <div class="page-header"><h2>Dashboard</h2></div>
+    <div class="legend">
+      <div class="legend-item">${statusDot('green')} Currently Have</div>
+      <div class="legend-item">${statusDot('blue')} Next Purchase</div>
+      <div class="legend-item">${statusDot('orange')} Eventual Purchase</div>
+      <div class="legend-item">${statusDot('red')} Needs Replacing</div>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-value" style="color:var(--green)">${owned}</div><div class="stat-label">Currently Have</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--blue)">${toBuy}</div><div class="stat-label">Next Purchase</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--orange)">${eventual}</div><div class="stat-label">Eventual</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--red)">${replace}</div><div class="stat-label">Needs Replacing</div></div>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-value">${fashion.length}</div><div class="stat-label">Fashion Items</div></div>
+      <div class="stat-card"><div class="stat-value">${skincare.length}</div><div class="stat-label">Skincare Products</div></div>
+      <div class="stat-card"><div class="stat-value">${pharma.length}</div><div class="stat-label">Pharmacology</div></div>
+      <div class="stat-card"><div class="stat-value">${goals.length}</div><div class="stat-label">Goals</div></div>
+    </div>
+    <div class="card">
+      <h3>Recent Items</h3>
+      <ul class="item-list">
+        ${purchases.slice(0, 10).map(p => `
+          <li class="item-row">
+            ${statusDot(p.status_color)}
+            <span class="item-name">${esc(p.name)}</span>
+            <span class="item-category">${esc(p.category || '')}</span>
+            <span class="item-category">${esc(p.item_type)}</span>
+          </li>
+        `).join('')}
+      </ul>
+      ${purchases.length === 0 ? '<div class="empty-state">No items yet. Add some from the sidebar!</div>' : ''}
+    </div>`;
+}
+
+// ── All Purchases ──
+async function renderPurchases(c) {
+  const items = await api('purchases');
+  c.innerHTML = `
+    <div class="page-header"><h2>All Purchases</h2></div>
+    <div class="legend">
+      <div class="legend-item">${statusDot('green')} Have</div>
+      <div class="legend-item">${statusDot('blue')} Next</div>
+      <div class="legend-item">${statusDot('orange')} Eventual</div>
+      <div class="legend-item">${statusDot('red')} Replace</div>
+    </div>
+    <div class="card">
+      <ul class="item-list">
+        ${items.map(p => `
+          <li class="item-row">
+            ${statusDot(p.status_color)}
+            <span class="item-name">${esc(p.name)}</span>
+            <span class="item-category">${esc(p.category || '—')}</span>
+            <span class="item-category">${esc(p.item_type)}</span>
+            ${p.link ? `<a href="${esc(p.link)}" target="_blank" class="item-link">Link</a>` : ''}
+          </li>
+        `).join('')}
+      </ul>
+      ${items.length === 0 ? '<div class="empty-state">No items yet.</div>' : ''}
+    </div>`;
+}
+
+// ── Fashion ──
+async function renderFashion(c) {
+  const items = await api('fashion');
+  const grouped = {};
+  fashionCategories.forEach(cat => grouped[cat.name] = []);
+  items.forEach(it => {
+    if (!grouped[it.category_name]) grouped[it.category_name] = [];
+    grouped[it.category_name].push(it);
+  });
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>Fashion</h2>
+      <button class="btn btn-primary" onclick="openFashionModal()">+ Add Item</button>
+    </div>
+    <div class="legend">
+      <div class="legend-item">${statusDot('green')} Have</div>
+      <div class="legend-item">${statusDot('blue')} Next</div>
+      <div class="legend-item">${statusDot('orange')} Eventual</div>
+      <div class="legend-item">${statusDot('red')} Replace</div>
+    </div>
+    ${Object.entries(grouped).map(([cat, items]) => `
+      <div class="card">
+        <h3>${esc(cat)}</h3>
+        <ul class="item-list">
+          ${items.map(it => `
+            <li class="item-row">
+              ${statusDot(it.status_color)}
+              <span class="item-name">${esc(it.name)}</span>
+              ${it.link ? `<a href="${esc(it.link)}" target="_blank" class="item-link">Link</a>` : ''}
+              ${it.rep_link ? `<a href="${esc(it.rep_link)}" target="_blank" class="item-link">Rep</a>` : ''}
+              <div class="item-actions">
+                <button class="btn-icon" onclick="openFashionModal(${it.id})">✎</button>
+                <button class="btn-icon btn-danger" onclick="deleteFashion(${it.id})">✕</button>
+              </div>
+            </li>
+          `).join('')}
+          ${items.length === 0 ? '<li class="item-row" style="color:var(--text-muted)">No items</li>' : ''}
+        </ul>
+      </div>
+    `).join('')}`;
+}
+
+async function openFashionModal(editId) {
+  let item = { category_id: fashionCategories[0]?.id, status_id: 1, name: '', link: '', rep_link: '', notes: '' };
+  if (editId) {
+    const items = await api('fashion');
+    item = items.find(i => i.id === editId) || item;
+  }
+  openModal(`
+    <h3>${editId ? 'Edit' : 'Add'} Fashion Item</h3>
+    <form id="fashion-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Category</label>
+          <select name="category_id">${fashionCategories.map(c =>
+            `<option value="${c.id}" ${c.id === item.category_id ? 'selected' : ''}>${c.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          ${statusSelect(item.status_id)}
+        </div>
+      </div>
+      <div class="form-group"><label>Name</label><input name="name" value="${esc(item.name || '')}" required></div>
+      <div class="form-row">
+        <div class="form-group"><label>Link</label><input name="link" value="${esc(item.link || '')}"></div>
+        <div class="form-group"><label>Rep Link</label><input name="rep_link" value="${esc(item.rep_link || '')}"></div>
+      </div>
+      <div class="form-group"><label>Notes</label><textarea name="notes">${esc(item.notes || '')}</textarea></div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveFashion(${editId || 'null'})">Save</button>
+    </div>`);
+}
+
+async function saveFashion(id) {
+  const data = getFormData('fashion-form');
+  data.category_id = Number(data.category_id);
+  data.status_id = Number(data.status_id);
+  if (id) await api(`fashion/${id}`, { method: 'PUT', body: data });
+  else await api('fashion', { method: 'POST', body: data });
+  closeModal();
+  toast(id ? 'Item updated' : 'Item added');
+  loadPage('fashion');
+}
+
+async function deleteFashion(id) {
+  if (!confirm('Delete this item?')) return;
+  await api(`fashion/${id}`, { method: 'DELETE' });
+  toast('Item deleted');
+  loadPage('fashion');
+}
+
+// ── Skincare ──
+async function renderSkincare(c) {
+  const items = await api('skincare');
+  const routineItems = {};
+  skincareRoutines.forEach(r => routineItems[r.id] = { id: r.id, name: r.name, products: [] });
+  const wanted = [];
+  items.forEach(it => {
+    if (it.is_wanted) wanted.push(it);
+    else if (it.routine_id && routineItems[it.routine_id]) routineItems[it.routine_id].products.push(it);
+  });
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>Skincare</h2>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="openAddRoutineModal()">+ Add Routine</button>
+        <button class="btn btn-primary" onclick="openSkincareModal()">+ Add Product</button>
+      </div>
+    </div>
+    <div class="legend">
+      <div class="legend-item">${statusDot('green')} Have</div>
+      <div class="legend-item">${statusDot('blue')} Next</div>
+      <div class="legend-item">${statusDot('orange')} Eventual</div>
+      <div class="legend-item">${statusDot('red')} Replace</div>
+    </div>
+    ${Object.values(routineItems).map(r => `
+      <div class="card">
+        <h3 style="display:flex;align-items:center">
+          <span style="flex:1">${esc(r.name)}</span>
+          <button class="btn-icon btn-danger" onclick="deleteRoutine(${r.id}, '${esc(r.name)}')" title="Remove routine" style="font-size:14px">✕</button>
+        </h3>
+        <ul class="item-list">
+          ${r.products.map((p, i) => `
+            <li class="item-row">
+              <span class="step-number">${i + 1}</span>
+              ${statusDot(p.status_color)}
+              <span class="item-name">${esc(p.name)}</span>
+              ${p.link ? `<a href="${esc(p.link)}" target="_blank" class="item-link">Link</a>` : ''}
+              <div class="item-actions">
+                <button class="btn-icon" onclick="openSkincareModal(${p.id})">✎</button>
+                <button class="btn-icon btn-danger" onclick="deleteSkincare(${p.id})">✕</button>
+              </div>
+            </li>
+          `).join('')}
+          ${r.products.length === 0 ? '<li class="item-row" style="color:var(--text-muted)">No products</li>' : ''}
+        </ul>
+      </div>
+    `).join('')}
+    ${wanted.length > 0 ? `
+      <div class="card">
+        <h3>Wanted Products</h3>
+        <ul class="item-list">
+          ${wanted.map(p => `
+            <li class="item-row">
+              ${statusDot(p.status_color)}
+              <span class="item-name">${esc(p.name)}</span>
+              ${p.link ? `<a href="${esc(p.link)}" target="_blank" class="item-link">Link</a>` : ''}
+              <div class="item-actions">
+                <button class="btn-icon" onclick="openSkincareModal(${p.id})">✎</button>
+                <button class="btn-icon btn-danger" onclick="deleteSkincare(${p.id})">✕</button>
+              </div>
+            </li>
+          `).join('')}
+        </ul>
+      </div>` : ''}`;
+}
+
+async function openSkincareModal(editId) {
+  let item = { routine_id: skincareRoutines[0]?.id, status_id: 1, name: '', step_order: 0, is_wanted: 0, link: '', notes: '' };
+  if (editId) {
+    const items = await api('skincare');
+    item = items.find(i => i.id === editId) || item;
+  }
+  openModal(`
+    <h3>${editId ? 'Edit' : 'Add'} Skincare Product</h3>
+    <form id="skincare-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Routine</label>
+          <select name="routine_id" id="skincare-routine-select" onchange="toggleNewRoutineInput()">
+            <option value="">— None (Wanted) —</option>
+            ${skincareRoutines.map(r =>
+              `<option value="${r.id}" ${r.id === item.routine_id ? 'selected' : ''}>${r.name}</option>`).join('')}
+            <option value="__new__">+ New Routine...</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" id="new-routine-input" style="display:none">
+        <label>New Routine Name</label>
+        <input name="new_routine_name" placeholder="e.g. Weekly Treatment, Hair Care...">
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          ${statusSelect(item.status_id)}
+        </div>
+      </div>
+      <div class="form-group"><label>Name</label><input name="name" value="${esc(item.name || '')}" required></div>
+      <div class="form-row">
+        <div class="form-group"><label>Step Order</label><input type="number" name="step_order" value="${item.step_order || 0}"></div>
+        <div class="form-group"><label>Wanted?</label><select name="is_wanted"><option value="0" ${!item.is_wanted ? 'selected' : ''}>No</option><option value="1" ${item.is_wanted ? 'selected' : ''}>Yes</option></select></div>
+      </div>
+      <div class="form-group"><label>Link</label><input name="link" value="${esc(item.link || '')}"></div>
+      <div class="form-group"><label>Notes</label><textarea name="notes">${esc(item.notes || '')}</textarea></div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSkincare(${editId || 'null'})">Save</button>
+    </div>`);
+}
+
+function toggleNewRoutineInput() {
+  const sel = document.getElementById('skincare-routine-select');
+  const el = document.getElementById('new-routine-input');
+  if (el) el.style.display = sel && sel.value === '__new__' ? 'block' : 'none';
+}
+
+async function saveSkincare(id) {
+  const data = getFormData('skincare-form');
+  // Handle new routine creation inline
+  if (data.routine_id === '__new__') {
+    const rname = data.new_routine_name;
+    if (!rname || !rname.trim()) { toast('Enter a routine name'); return; }
+    const res = await api('skincare/routines', { method: 'POST', body: { name: rname.trim() } });
+    if (res.error) { toast(res.error); return; }
+    data.routine_id = res.id;
+    skincareRoutines = await api('skincare/routines');
+  } else {
+    data.routine_id = data.routine_id ? Number(data.routine_id) : null;
+  }
+  delete data.new_routine_name;
+  data.status_id = Number(data.status_id);
+  data.step_order = Number(data.step_order) || 0;
+  data.is_wanted = Number(data.is_wanted) || 0;
+  if (id) await api(`skincare/${id}`, { method: 'PUT', body: data });
+  else await api('skincare', { method: 'POST', body: data });
+  closeModal();
+  toast(id ? 'Product updated' : 'Product added');
+  loadPage('skincare');
+}
+
+async function deleteSkincare(id) {
+  if (!confirm('Delete this product?')) return;
+  await api(`skincare/${id}`, { method: 'DELETE' });
+  toast('Product deleted');
+  loadPage('skincare');
+}
+
+function openAddRoutineModal() {
+  openModal(`
+    <h3>Add Routine</h3>
+    <form id="routine-form">
+      <div class="form-group">
+        <label>Routine Name</label>
+        <input name="name" placeholder="e.g. Weekly Treatment, Hair Care..." required>
+      </div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveNewRoutine()">Add</button>
+    </div>`);
+}
+
+async function saveNewRoutine() {
+  const data = getFormData('routine-form');
+  if (!data.name || !data.name.trim()) { toast('Enter a routine name'); return; }
+  const res = await api('skincare/routines', { method: 'POST', body: { name: data.name.trim() } });
+  if (res.error) { toast(res.error); return; }
+  closeModal();
+  toast('Routine added');
+  skincareRoutines = await api('skincare/routines');
+  loadPage('skincare');
+}
+
+async function deleteRoutine(id, name) {
+  if (!confirm('Remove "' + name + '" routine? Its products will move to Wanted.')) return;
+  await api('skincare/routines/' + id, { method: 'DELETE' });
+  toast('Routine removed');
+  skincareRoutines = await api('skincare/routines');
+  loadPage('skincare');
+}
+
+// ── Pharmacology ──
+async function renderPharmacology(c) {
+  const items = await api('pharmacology');
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>Pharmacology</h2>
+      <button class="btn btn-primary" onclick="openPharmaModal()">+ Add Item</button>
+    </div>
+    <div class="card">
+      <ul class="item-list">
+        ${items.map(p => `
+          <li class="item-row">
+            ${statusDot(p.status_color)}
+            <span class="item-name">${esc(p.name)}</span>
+            <span class="item-category">${esc(p.dosage || '')} ${esc(p.frequency || '')}</span>
+            ${p.link ? `<a href="${esc(p.link)}" target="_blank" class="item-link">Link</a>` : ''}
+            <div class="item-actions">
+              <button class="btn-icon" onclick="openPharmaModal(${p.id})">✎</button>
+              <button class="btn-icon btn-danger" onclick="deletePharma(${p.id})">✕</button>
+            </div>
+          </li>
+        `).join('')}
+      </ul>
+      ${items.length === 0 ? '<div class="empty-state">No pharmacology items yet. Click + to add one.</div>' : ''}
+    </div>`;
+}
+
+async function openPharmaModal(editId) {
+  let item = { status_id: 1, name: '', dosage: '', frequency: '', link: '', notes: '' };
+  if (editId) {
+    const items = await api('pharmacology');
+    item = items.find(i => i.id === editId) || item;
+  }
+  openModal(`
+    <h3>${editId ? 'Edit' : 'Add'} Pharmacology Item</h3>
+    <form id="pharma-form">
+      <div class="form-row">
+        <div class="form-group"><label>Name</label><input name="name" value="${esc(item.name || '')}" required></div>
+        <div class="form-group"><label>Status</label>${statusSelect(item.status_id)}</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Dosage</label><input name="dosage" value="${esc(item.dosage || '')}"></div>
+        <div class="form-group"><label>Frequency</label><input name="frequency" value="${esc(item.frequency || '')}"></div>
+      </div>
+      <div class="form-group"><label>Link</label><input name="link" value="${esc(item.link || '')}"></div>
+      <div class="form-group"><label>Notes</label><textarea name="notes">${esc(item.notes || '')}</textarea></div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="savePharma(${editId || 'null'})">Save</button>
+    </div>`);
+}
+
+async function savePharma(id) {
+  const data = getFormData('pharma-form');
+  data.status_id = Number(data.status_id);
+  if (id) await api(`pharmacology/${id}`, { method: 'PUT', body: data });
+  else await api('pharmacology', { method: 'POST', body: data });
+  closeModal();
+  toast(id ? 'Item updated' : 'Item added');
+  loadPage('pharmacology');
+}
+
+async function deletePharma(id) {
+  if (!confirm('Delete this item?')) return;
+  await api(`pharmacology/${id}`, { method: 'DELETE' });
+  toast('Item deleted');
+  loadPage('pharmacology');
+}
+
+// ── Goals ──
+async function renderGoals(c) {
+  const goals = await api('goals');
+  const grouped = {};
+  lifeAreas.forEach(a => grouped[a.name] = []);
+  goals.forEach(g => {
+    if (!grouped[g.area_name]) grouped[g.area_name] = [];
+    grouped[g.area_name].push(g);
+  });
+  const priorityLabel = p => p === 2 ? '<span class="priority-high">High</span>' : p === 1 ? '<span class="priority-med">Med</span>' : '<span class="priority-low">Low</span>';
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>Goals</h2>
+      <button class="btn btn-primary" onclick="openGoalModal()">+ Add Goal</button>
+    </div>
+    ${Object.entries(grouped).map(([area, goals]) => `
+      <div class="card">
+        <h3>${esc(area)}</h3>
+        <ul class="item-list">
+          ${goals.map(g => `
+            <li class="goal-row">
+              <div class="goal-checkbox ${g.is_completed ? 'checked' : ''}" onclick="toggleGoal(${g.id}, ${g.is_completed ? 0 : 1})"></div>
+              <div style="flex:1">
+                <div class="goal-title ${g.is_completed ? 'completed' : ''}">${esc(g.title)}</div>
+                ${g.description ? `<div class="goal-meta">${esc(g.description)}</div>` : ''}
+              </div>
+              <span class="goal-meta">${priorityLabel(g.priority)}</span>
+              ${g.target_date ? `<span class="goal-meta">${esc(g.target_date)}</span>` : ''}
+              <div class="item-actions">
+                <button class="btn-icon" onclick="openGoalModal(${g.id})">✎</button>
+                <button class="btn-icon btn-danger" onclick="deleteGoal(${g.id})">✕</button>
+              </div>
+            </li>
+          `).join('')}
+          ${goals.length === 0 ? '<li class="goal-row" style="color:var(--text-muted)">No goals yet</li>' : ''}
+        </ul>
+      </div>
+    `).join('')}`;
+}
+
+async function openGoalModal(editId) {
+  let item = { life_area_id: lifeAreas[0]?.id, title: '', description: '', target_date: '', priority: 0 };
+  if (editId) {
+    const goals = await api('goals');
+    item = goals.find(g => g.id === editId) || item;
+  }
+  openModal(`
+    <h3>${editId ? 'Edit' : 'Add'} Goal</h3>
+    <form id="goal-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Life Area</label>
+          <select name="life_area_id">${lifeAreas.map(a =>
+            `<option value="${a.id}" ${a.id === item.life_area_id ? 'selected' : ''}>${a.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Priority</label>
+          <select name="priority">
+            <option value="0" ${item.priority === 0 ? 'selected' : ''}>Low</option>
+            <option value="1" ${item.priority === 1 ? 'selected' : ''}>Medium</option>
+            <option value="2" ${item.priority === 2 ? 'selected' : ''}>High</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Title</label><input name="title" value="${esc(item.title || '')}" required></div>
+      <div class="form-group"><label>Description</label><textarea name="description">${esc(item.description || '')}</textarea></div>
+      <div class="form-group"><label>Target Date</label><input type="date" name="target_date" value="${esc(item.target_date || '')}"></div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveGoal(${editId || 'null'})">Save</button>
+    </div>`);
+}
+
+async function saveGoal(id) {
+  const data = getFormData('goal-form');
+  data.life_area_id = Number(data.life_area_id);
+  data.priority = Number(data.priority);
+  if (id) await api(`goals/${id}`, { method: 'PUT', body: data });
+  else await api('goals', { method: 'POST', body: data });
+  closeModal();
+  toast(id ? 'Goal updated' : 'Goal added');
+  loadPage('goals');
+}
+
+async function toggleGoal(id, completed) {
+  const goals = await api('goals');
+  const goal = goals.find(g => g.id === id);
+  if (!goal) return;
+  goal.is_completed = completed;
+  await api(`goals/${id}`, { method: 'PUT', body: goal });
+  loadPage('goals');
+}
+
+async function deleteGoal(id) {
+  if (!confirm('Delete this goal?')) return;
+  await api(`goals/${id}`, { method: 'DELETE' });
+  toast('Goal deleted');
+  loadPage('goals');
+}
+
+// ── Utils ──
+function esc(str) {
+  if (str === null || str === undefined) return '';
+  const d = document.createElement('div');
+  d.textContent = String(str);
+  return d.innerHTML;
+}
+
+// ── Timezone Setting ──
+const defaultTZ = 'America/New_York';
+function getTimezone() { return localStorage.getItem('lifeopt_tz') || defaultTZ; }
+function setTimezone(tz) { localStorage.setItem('lifeopt_tz', tz); }
+function nowInTZ() {
+  const tz = getTimezone();
+  const s = new Date().toLocaleString('en-US', { timeZone: tz });
+  return new Date(s);
+}
+
+// ── Live Clock ──
+function formatLiveClock() {
+  const now = nowInTZ();
+  const h = now.getHours();
+  const m = now.getMinutes();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  const mm = m.toString().padStart(2, '0');
+  return `${h12}:${mm} ${ampm}`;
+}
+function formatLiveDate() {
+  return new Date().toLocaleDateString('en-US', { timeZone: getTimezone(), weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+function parseTimeToMin(t) {
+  if (!t) return null;
+  t = t.trim().toUpperCase();
+  const parts = t.replace('AM','').replace('PM','').trim().split(':');
+  let h = parseInt(parts[0]);
+  const m = parts.length > 1 ? parseInt(parts[1]) : 0;
+  if (isNaN(h)) return null;
+  if (t.includes('PM') && h !== 12) h += 12;
+  if (t.includes('AM') && h === 12) h = 0;
+  return h * 60 + m;
+}
+function getCurrentTaskIdx(tasks) {
+  const now = nowInTZ();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  let current = -1;
+  for (let i = 0; i < tasks.length; i++) {
+    const tMin = parseTimeToMin(tasks[i].task_time);
+    if (tMin !== null && tMin <= nowMin) current = i;
+  }
+  return current;
+}
+
+// ── Early Complete / Downtime ──
+function htlDateKey() {
+  const d = nowInTZ();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function getEarlyCompletes() {
+  try { return JSON.parse(localStorage.getItem('htl_early_' + htlDateKey()) || '{}'); } catch { return {}; }
+}
+function setEarlyComplete(taskId) {
+  const ec = getEarlyCompletes();
+  ec[taskId] = Date.now();
+  localStorage.setItem('htl_early_' + htlDateKey(), JSON.stringify(ec));
+}
+function getSkips() {
+  try { return JSON.parse(localStorage.getItem('htl_skips_' + htlDateKey()) || '{}'); } catch { return {}; }
+}
+function setSkip(taskId) {
+  const sk = getSkips();
+  sk[taskId] = true;
+  localStorage.setItem('htl_skips_' + htlDateKey(), JSON.stringify(sk));
+}
+function htlCompleteEarly(taskId) {
+  setEarlyComplete(taskId);
+  loadPage('schedule');
+}
+function htlSkipDowntime(taskId) {
+  setSkip(taskId);
+  loadPage('schedule');
+}
+function openTimezoneModal() {
+  const current = getTimezone();
+  const zones = [
+    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+    'America/Anchorage', 'Pacific/Honolulu', 'America/Phoenix',
+    'America/Toronto', 'America/Vancouver',
+    'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
+    'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Kolkata', 'Asia/Dubai',
+    'Australia/Sydney', 'Pacific/Auckland',
+    'UTC'
+  ];
+  const labels = {
+    'America/New_York': 'Eastern (EST/EDT)',
+    'America/Chicago': 'Central (CST/CDT)',
+    'America/Denver': 'Mountain (MST/MDT)',
+    'America/Los_Angeles': 'Pacific (PST/PDT)',
+    'America/Anchorage': 'Alaska (AKST/AKDT)',
+    'Pacific/Honolulu': 'Hawaii (HST)',
+    'America/Phoenix': 'Arizona (MST)',
+    'America/Toronto': 'Toronto (EST/EDT)',
+    'America/Vancouver': 'Vancouver (PST/PDT)',
+    'Europe/London': 'London (GMT/BST)',
+    'Europe/Paris': 'Paris (CET/CEST)',
+    'Europe/Berlin': 'Berlin (CET/CEST)',
+    'Europe/Moscow': 'Moscow (MSK)',
+    'Asia/Tokyo': 'Tokyo (JST)',
+    'Asia/Shanghai': 'Shanghai (CST)',
+    'Asia/Kolkata': 'India (IST)',
+    'Asia/Dubai': 'Dubai (GST)',
+    'Australia/Sydney': 'Sydney (AEST/AEDT)',
+    'Pacific/Auckland': 'Auckland (NZST/NZDT)',
+    'UTC': 'UTC'
+  };
+  openModal(`
+    <h3>⚙️ Timezone Setting</h3>
+    <div class="form-group">
+      <label>Select your timezone</label>
+      <select id="tz-select">
+        ${zones.map(z => `<option value="${z}" ${z === current ? 'selected' : ''}>${labels[z] || z}</option>`).join('')}
+      </select>
+    </div>
+    <div style="margin-top:8px;color:var(--text-muted);font-size:12px">Current: ${current}</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTimezone()">Save</button>
+    </div>`);
+}
+function saveTimezone() {
+  const tz = document.getElementById('tz-select').value;
+  setTimezone(tz);
+  closeModal();
+  toast('Timezone set to ' + tz);
+  if (currentPage === 'schedule') loadPage('schedule');
+}
+
+let clockInterval = null;
+function startClock() {
+  if (clockInterval) clearInterval(clockInterval);
+  clockInterval = setInterval(() => {
+    const el = document.getElementById('live-clock');
+    if (el) el.textContent = formatLiveClock();
+    const el2 = document.getElementById('live-date');
+    if (el2) el2.textContent = formatLiveDate();
+    // Update downtime countdowns
+    document.querySelectorAll('[data-htl-countdown]').forEach(el => {
+      const targetMin = parseInt(el.dataset.htlCountdown);
+      const n = nowInTZ();
+      const nowM = n.getHours() * 60 + n.getMinutes();
+      const remaining = targetMin - nowM;
+      if (remaining <= 0) { loadPage('schedule'); return; }
+      el.textContent = remaining + 'm';
+    });
+  }, 10000);
+}
+
+// ── Master Schedule ──
+let scheduleView = 'week';
+let weekCarouselStart = nowInTZ().getDay();
+(function() { const t = nowInTZ().getDay(); weekCarouselStart = Math.min(t, 4); })();
+
+function shiftWeekCarousel(delta) {
+  weekCarouselStart = Math.max(0, Math.min(4, weekCarouselStart + delta));
+  loadPage('schedule');
+}
+
+function jumpWeekCarousel(pos) {
+  weekCarouselStart = Math.max(0, Math.min(4, pos));
+  loadPage('schedule');
+}
+
+let tlCarouselStart = 0;
+function shiftTlCarousel(delta, max) {
+  tlCarouselStart = Math.max(0, Math.min(max, tlCarouselStart + delta));
+  loadPage('schedule');
+}
+function jumpTlCarousel(pos) {
+  tlCarouselStart = pos;
+  loadPage('schedule');
+}
+
+function toggleWeekTask(dayIdx, taskId, checked) {
+  const store = JSON.parse(localStorage.getItem('weekChecks') || '{}');
+  const now = new Date();
+  const start = new Date(now);
+  start.setDate(now.getDate() - now.getDay());
+  const weekKey = `week-${start.getFullYear()}-${start.getMonth()}-${start.getDate()}`;
+  if (!store[weekKey]) store[weekKey] = {};
+  if (checked) store[weekKey][`${dayIdx}-${taskId}`] = true;
+  else delete store[weekKey][`${dayIdx}-${taskId}`];
+  // Clean old weeks
+  Object.keys(store).forEach(k => { if (k !== weekKey) delete store[k]; });
+  localStorage.setItem('weekChecks', JSON.stringify(store));
+  loadPage('schedule');
+}
+
+async function renderSchedule(c) {
+  const tasks = await api('schedule');
+  const scheduleSections = sidebarSections.filter(s => s.is_schedule);
+
+  const intervals = [
+    { key: 'daily', label: 'Daily', icon: '☀️' },
+    { key: 'every other day', label: 'Every Other Day', icon: '🔄' },
+    { key: 'weekly', label: 'Weekly', icon: '📆' },
+    { key: 'biweekly', label: 'Biweekly', icon: '📅' },
+    { key: 'monthly', label: 'Monthly', icon: '🗓' },
+    { key: 'yearly', label: 'Yearly', icon: '📋' },
+    { key: 'as needed', label: 'As Needed', icon: '⚡' },
+    { key: 'none', label: 'Unscheduled', icon: '📌' },
+  ];
+
+  // Group by interval
+  const byInterval = {};
+  intervals.forEach(i => byInterval[i.key] = []);
+  tasks.forEach(t => {
+    const key = (t.task_interval || 'none').toLowerCase();
+    if (byInterval[key]) byInterval[key].push(t);
+    else byInterval['none'].push(t);
+  });
+
+  // Group by section (routine), sorted by task time
+  const bySection = {};
+  scheduleSections.forEach(s => bySection[s.page_key] = { label: s.label, tasks: [] });
+  tasks.forEach(t => {
+    if (bySection[t.section_key]) bySection[t.section_key].tasks.push(t);
+  });
+  // Sort each section's tasks by sort_order then task_time
+  Object.values(bySection).forEach(s => {
+    s.tasks.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  });
+
+  function groupBySubgroup(taskList) {
+    const groups = [];
+    const seen = {};
+    taskList.forEach(t => {
+      const key = t.subgroup || '__none__';
+      if (!seen[key]) { seen[key] = { label: t.subgroup, tasks: [] }; groups.push(seen[key]); }
+      seen[key].tasks.push(t);
+    });
+    return groups;
+  }
+
+  function renderTask(t, showSection) {
+    const isQO = t.is_quick_objective;
+    return `<div class="schedule-task ${isQO ? 'schedule-task-qo' : ''}">
+      ${statusDot(t.status_color)}
+      <div class="schedule-task-info">
+        <div class="schedule-task-name">${esc(t.name)}${isQO ? ' <span class="qo-badge-sm">QO</span>' : ''}</div>
+        ${t.notes ? `<div class="schedule-task-meta">${esc(t.notes).substring(0, 80)}${t.notes.length > 80 ? '…' : ''}</div>` : ''}
+      </div>
+      ${isQO ? '<span class="schedule-task-time" style="font-style:italic;opacity:0.6">anytime</span>' : (t.task_time ? `<span class="schedule-task-time">${esc(t.task_time)}</span>` : '')}
+      ${t.task_count ? `<span class="schedule-task-time">${t.task_count}×</span>` : ''}
+      ${showSection ? `<span class="schedule-task-section">${esc(t.section_label)}</span>` : ''}
+    </div>`;
+  }
+
+  function renderSubgroupedTasks(taskList, showSection) {
+    const sg = groupBySubgroup(taskList);
+    const hasAnySubgroup = sg.some(g => g.label);
+    if (!hasAnySubgroup) return taskList.map(t => renderTask(t, showSection)).join('');
+    return sg.map(g => `
+      ${subgroupHeader(g.label)}
+      ${g.tasks.map(t => renderTask(t, showSection)).join('')}
+    `).join('');
+  }
+
+  function renderByRoutine() {
+    const entries = Object.entries(bySection).filter(([_, s]) => s.tasks.length > 0);
+    if (entries.length === 0) return '<div class="card"><div class="empty-state">No tasks found.</div></div>';
+    return `<div class="schedule-grid">${entries.map(([key, s]) => `
+      <div class="schedule-column">
+        <div class="schedule-column-header">
+          <span>📋</span> ${esc(s.label)}
+          <span class="col-count">${s.tasks.length}</span>
+        </div>
+        ${renderSubgroupedTasks(s.tasks, false)}
+      </div>
+    `).join('')}</div>`;
+  }
+
+  function renderByInterval() {
+    const visible = scheduleView === 'all'
+      ? intervals
+      : intervals.filter(i => i.key === scheduleView);
+    return `<div class="schedule-grid">${visible.filter(i => byInterval[i.key].length > 0).map(i => `
+      <div class="schedule-column">
+        <div class="schedule-column-header">
+          <span>${i.icon}</span> ${i.label}
+          <span class="col-count">${byInterval[i.key].length}</span>
+        </div>
+        ${renderSubgroupedTasks(byInterval[i.key], true)}
+      </div>
+    `).join('')}</div>`;
+  }
+
+  function renderTimeline() {
+    const entries = Object.entries(bySection).filter(([_, s]) => s.tasks.length > 0);
+    if (entries.length === 0) return '<div class="card"><div class="empty-state">No tasks found.</div></div>';
+    const todayDayMap = {
+      0: 'custom_weekend_routine', 1: 'custom_mwf_routine', 2: 'custom_tuth_routine',
+      3: 'custom_wed_routine', 4: 'custom_thu_routine', 5: 'custom_mwf_routine', 6: 'custom_weekend_routine'
+    };
+    const now = nowInTZ();
+    const todayKey = todayDayMap[now.getDay()];
+
+    // Default to today's routine
+    const todayEntryIdx = entries.findIndex(([key]) => key === todayKey);
+    if (tlCarouselStart === 0 && todayEntryIdx >= 0) tlCarouselStart = todayEntryIdx;
+    const maxIdx = entries.length - 1;
+    const idx = Math.min(tlCarouselStart, maxIdx);
+    const [key, s] = entries[idx];
+    const isToday = key === todayKey;
+    const allTasks = s.tasks;
+    const currentIdx = isToday ? getCurrentTaskIdx(allTasks) : -1;
+
+    const sgColor = (t) => t.subgroup ? subgroupColor(t.subgroup) : 'var(--border)';
+    const earlyCompletes = isToday ? getEarlyCompletes() : {};
+    const skips = isToday ? getSkips() : {};
+    const nowMin = (() => { const n = nowInTZ(); return n.getHours() * 60 + n.getMinutes(); })();
+
+    const taskCards = allTasks.map((t, ti) => {
+      const isPast = isToday && ti < currentIdx;
+      const isCurrent = isToday && ti === currentIdx;
+      const isNext = isToday && ti === currentIdx + 1;
+      const isFuture = isToday && currentIdx >= 0 && ti > currentIdx + 1;
+      const tid = String(t.id);
+      const earlyDone = !!earlyCompletes[tid];
+      const skipped = !!skips[tid];
+
+      // Determine if this task has downtime (completed early, next task hasn't started yet)
+      let hasDowntime = false;
+      let downtimeMin = 0;
+      if (earlyDone && !skipped && ti < allTasks.length - 1) {
+        const nextTime = parseTimeToMin(allTasks[ti + 1].task_time);
+        if (nextTime !== null && nextTime > nowMin) {
+          hasDowntime = true;
+          downtimeMin = nextTime - nowMin;
+        }
+      }
+
+      const stateClass = earlyDone ? 'htl-done' : (isPast ? 'htl-past' : isCurrent ? 'htl-active' : isNext ? 'htl-upcoming' : (isFuture ? 'htl-future' : ''));
+      const isEffectivelyCurrent = isCurrent && !earlyDone;
+      const railGlow = isEffectivelyCurrent ? 'htl-rail-glow' : '';
+
+      // Build rail: downtime rail or normal rail
+      let rail = '';
+      if (ti < allTasks.length - 1) {
+        if (hasDowntime) {
+          const dm = Math.floor(downtimeMin);
+          const ds = Math.floor((downtimeMin - dm) * 60);
+          rail = `<div class="htl-rail-downtime">
+            <div class="htl-rail-line-red"></div>
+            <div class="htl-downtime-info">
+              <div class="htl-downtime-label">down time</div>
+              <div class="htl-downtime-timer" data-htl-countdown="${parseTimeToMin(allTasks[ti+1].task_time)}">${dm}m</div>
+              <button class="htl-skip-btn" onclick="htlSkipDowntime('${tid}')">Skip ›</button>
+            </div>
+          </div>`;
+        } else {
+          rail = `<div class="htl-rail ${railGlow}"><div class="htl-rail-line"></div></div>`;
+        }
+      }
+
+      // Show complete button on current task (not already done)
+      const showComplete = isEffectivelyCurrent;
+
+      return `<div class="htl-node ${stateClass}" ${isEffectivelyCurrent ? 'data-htl-current' : ''}>
+        <div class="htl-card" style="--sg-color:${sgColor(t)}">
+          <div class="htl-dot-wrap">
+            <div class="timeline-dot ${isEffectivelyCurrent ? 'tl-dot-glow' : ''}" style="background:${isEffectivelyCurrent ? 'var(--accent)' : earlyDone ? 'var(--green)' : sgColor(t)}"></div>
+          </div>
+          <div class="htl-time">${esc(t.task_time || '')}</div>
+          <div class="htl-name">${esc(t.name)}</div>
+          ${isEffectivelyCurrent ? '<div class="htl-badge"><span class="week-now-indicator">NOW</span></div>' : ''}
+          ${isNext && !earlyDone ? '<div class="htl-badge"><span class="week-next-indicator">NEXT</span></div>' : ''}
+          ${earlyDone ? '<div class="htl-badge" style="color:var(--green);font-size:10px;font-weight:600">✓ Done</div>' : ''}
+          ${t.subgroup ? `<div class="htl-sg" style="color:${sgColor(t)}">${esc(t.subgroup)}</div>` : ''}
+          ${showComplete ? `<button class="htl-complete-btn" onclick="htlCompleteEarly('${tid}')">Complete ✓</button>` : ''}
+        </div>
+      </div>${rail}`;
+    }).join('');
+
+    const dots = entries.map((_, p) =>
+      `<div class="week-nav-dot ${p === idx ? 'active' : ''}" onclick="jumpTlCarousel(${p})"></div>`
+    ).join('');
+
+    return `
+      <div class="week-carousel" style="align-items:center">
+        <button class="week-arrow" onclick="shiftTlCarousel(-1,${maxIdx})" ${idx <= 0 ? 'disabled' : ''}>‹</button>
+        <div style="flex:1;min-width:0;text-align:center">
+          <h3 style="margin-bottom:4px">📋 ${esc(s.label)}${isToday ? ' <span class="week-today-badge">Today</span>' : ''}</h3>
+        </div>
+        <button class="week-arrow" onclick="shiftTlCarousel(1,${maxIdx})" ${idx >= maxIdx ? 'disabled' : ''}>›</button>
+      </div>
+      <div class="week-nav-dots" style="margin-bottom:16px">${dots}</div>
+      <div class="htl-scroll" id="htl-scroll-container">
+        <div class="htl-track">${taskCards}</div>
+      </div>`;
+  }
+
+  // Auto-scroll timeline to current task after render
+  function htlAutoScroll() {
+    const container = document.getElementById('htl-scroll-container');
+    const cur = container && container.querySelector('[data-htl-current]');
+    if (container && cur) {
+      const offset = cur.offsetLeft - container.offsetWidth / 2 + cur.offsetWidth / 2;
+      container.scrollTo({ left: Math.max(0, offset), behavior: 'smooth' });
+    }
+  }
+
+  // ── Week Overview helpers ──
+  const dayRoutineMap = {
+    0: 'custom_weekend_routine',  // Sunday
+    1: 'custom_mwf_routine',     // Monday
+    2: 'custom_tuth_routine',    // Tuesday
+    3: 'custom_wed_routine',     // Wednesday
+    4: 'custom_thu_routine',     // Thursday
+    5: 'custom_mwf_routine',     // Friday
+    6: 'custom_weekend_routine', // Saturday
+  };
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayNamesShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  function getWeekKey() {
+    const now = new Date();
+    const start = new Date(now);
+    start.setDate(now.getDate() - now.getDay());
+    return `week-${start.getFullYear()}-${start.getMonth()}-${start.getDate()}`;
+  }
+
+  function isTaskChecked(dayIdx, taskId) {
+    const store = JSON.parse(localStorage.getItem('weekChecks') || '{}');
+    return !!(store[getWeekKey()] && store[getWeekKey()][`${dayIdx}-${taskId}`]);
+  }
+
+  function renderWeekOverview() {
+    const today = nowInTZ();
+    const todayIdx = today.getDay();
+    const nowMin = today.getHours() * 60 + today.getMinutes();
+    const weekKey = getWeekKey();
+    const store = JSON.parse(localStorage.getItem('weekChecks') || '{}');
+    const weekData = store[weekKey] || {};
+
+    const visibleDays = dayNames.slice(weekCarouselStart, weekCarouselStart + 3);
+    const visibleIndices = [weekCarouselStart, weekCarouselStart + 1, weekCarouselStart + 2].filter(i => i < 7);
+
+    const cards = visibleIndices.map(idx => {
+      const day = dayNames[idx];
+      const routineKey = dayRoutineMap[idx];
+      const section = bySection[routineKey];
+      const dayTasks = section ? section.tasks : [];
+      const isToday = idx === todayIdx;
+      const checkedCount = dayTasks.filter(t => weekData[`${idx}-${t.id}`]).length;
+      const pct = dayTasks.length ? Math.round(checkedCount / dayTasks.length * 100) : 0;
+      const sg = groupBySubgroup(dayTasks);
+      const currentIdx = isToday ? getCurrentTaskIdx(dayTasks) : -1;
+      const nextIdx = currentIdx + 1 < dayTasks.length ? currentIdx + 1 : -1;
+
+      return `
+      <div class="week-day-card ${isToday ? 'week-day-today' : ''}">
+        <div class="week-day-header">
+          <span class="week-day-name">${day}${isToday ? ' <span class="week-today-badge">Today</span>' : ''}</span>
+          <span class="week-day-progress">${checkedCount}/${dayTasks.length} <span class="week-pct">${pct}%</span></span>
+        </div>
+        <div class="week-day-bar"><div class="week-day-bar-fill" style="width:${pct}%"></div></div>
+        <div class="week-day-tasks">
+          ${sg.map(g => {
+            return `
+            ${g.label ? `<div class="week-subgroup-header" style="color:${subgroupColor(g.label)}"><span class="subgroup-dot" style="background:${subgroupColor(g.label)}"></span>${esc(g.label)}</div>` : ''}
+            ${g.tasks.map(t => {
+              const checked = weekData[`${idx}-${t.id}`];
+              const globalIdx = dayTasks.indexOf(t);
+              const isCurrent = isToday && globalIdx === currentIdx;
+              const isNext = isToday && globalIdx === nextIdx;
+              const tMin = parseTimeToMin(t.task_time);
+              const isPast = isToday && tMin !== null && tMin < nowMin && !isCurrent;
+              return `<label class="week-task-row ${checked ? 'week-task-done' : ''} ${isCurrent ? 'week-task-current' : ''} ${isNext ? 'week-task-next' : ''} ${isPast && !checked ? 'week-task-past' : ''}">
+                <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleWeekTask(${idx},${t.id},this.checked)">
+                <span class="week-task-time">${esc(t.task_time || '')}</span>
+                <span class="week-task-name">${esc(t.name)}</span>
+                ${isCurrent ? '<span class="week-now-indicator">NOW</span>' : ''}
+                ${isNext ? '<span class="week-next-indicator">NEXT</span>' : ''}
+              </label>`;
+            }).join('')}`;
+          }).join('')}
+          ${dayTasks.length === 0 ? '<div style="color:var(--text-muted);padding:8px;font-size:12px">No tasks</div>' : ''}
+        </div>
+      </div>`;
+    }).join('');
+
+    const dots = [0,1,2,3,4].map(p =>
+      `<div class="week-nav-dot ${p === weekCarouselStart ? 'active' : ''}" onclick="jumpWeekCarousel(${p})"></div>`
+    ).join('');
+
+    return `
+      <div class="week-carousel">
+        <button class="week-arrow" onclick="shiftWeekCarousel(-1)" ${weekCarouselStart <= 0 ? 'disabled' : ''}>‹</button>
+        <div class="week-overview">${cards}</div>
+        <button class="week-arrow" onclick="shiftWeekCarousel(1)" ${weekCarouselStart >= 4 ? 'disabled' : ''}>›</button>
+      </div>
+      <div class="week-nav-dots">${dots}</div>`;
+  }
+
+  const isIntervalTab = scheduleView !== 'by-routine' && scheduleView !== 'timeline' && scheduleView !== 'week';
+
+  c.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h2>📅 Master Schedule</h2>
+        <span style="color:var(--text-muted);font-size:13px">${tasks.length} task${tasks.length !== 1 ? 's' : ''} across ${scheduleSections.length} schedule${scheduleSections.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="live-clock-box">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+          <div id="live-clock" class="live-clock">${formatLiveClock()}</div>
+          <button class="btn-icon tz-btn" onclick="openTimezoneModal()" title="Timezone settings">⚙️</button>
+        </div>
+        <div id="live-date" class="live-date">${formatLiveDate()}</div>
+        <div style="font-size:11px;color:var(--text-muted);opacity:0.6;text-align:right">${getTimezone()}</div>
+      </div>
+    </div>
+    <div class="schedule-tabs">
+      <div class="schedule-tab ${scheduleView === 'week' ? 'active' : ''}" onclick="scheduleView='week';loadPage('schedule')">📅 Week Overview</div>
+      <div class="schedule-tab ${scheduleView === 'by-routine' ? 'active' : ''}" onclick="scheduleView='by-routine';loadPage('schedule')">📋 By Routine</div>
+      <div class="schedule-tab ${scheduleView === 'timeline' ? 'active' : ''}" onclick="scheduleView='timeline';loadPage('schedule')">⏱ Timeline</div>
+      <div class="schedule-tab ${scheduleView === 'all' ? 'active' : ''}" onclick="scheduleView='all';loadPage('schedule')">📊 By Frequency</div>
+      ${intervals.filter(i => byInterval[i.key].length > 0).map(i =>
+        `<div class="schedule-tab ${scheduleView === i.key ? 'active' : ''}" onclick="scheduleView='${i.key}';loadPage('schedule')">${i.icon} ${i.label} (${byInterval[i.key].length})</div>`
+      ).join('')}
+    </div>
+    ${tasks.length === 0 ? `<div class="card"><div class="empty-state">No tasks found. Mark sections as schedules (📅 toggle in sidebar) and add items as tasks.</div></div>` : ''}
+    ${scheduleView === 'week' ? renderWeekOverview() : scheduleView === 'by-routine' ? renderByRoutine() : scheduleView === 'timeline' ? renderTimeline() : renderByInterval()}`;
+  startClock();
+  if (scheduleView === 'timeline') setTimeout(htlAutoScroll, 50);
+}
+
+// ── Init ──
+async function init() {
+  [statuses, fashionCategories, skincareRoutines, lifeAreas, sidebarSections] = await Promise.all([
+    api('statuses'),
+    api('fashion/categories'),
+    api('skincare/routines'),
+    api('life-areas'),
+    api('sidebar')
+  ]);
+  buildSidebar();
+  loadPage('dashboard');
+}
+
+init();
+</script>
+</body>
+</html>
