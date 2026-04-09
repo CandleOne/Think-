@@ -5,6 +5,33 @@ Flask backend serving API + frontend for managing the life optimization database
 import sqlite3
 import os
 from flask import Flask, request, jsonify, send_from_directory
+
+
+def load_local_env(env_path='.env'):
+    """Load KEY=VALUE pairs from a local .env file without external dependencies."""
+    if not os.path.exists(env_path):
+        return
+    try:
+        with open(env_path, 'r', encoding='utf-8') as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+                if not key:
+                    continue
+                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                    value = value[1:-1]
+                os.environ.setdefault(key, value)
+    except OSError:
+        # If .env cannot be read, continue with process environment only.
+        pass
+
+
+load_local_env()
+
 from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info, query_ai
 
 app = Flask(__name__, static_folder='static')
