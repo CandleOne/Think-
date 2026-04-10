@@ -664,37 +664,45 @@ def query_ai_empowered(prompt: str, context: dict[str, Any] | None = None, token
 # ── Web Search ────────────────────────────────────────────────────────────────
 
 def web_search(query: str, num_results: int = 5) -> list[dict[str, str]]:
-    """Search the web via Google Custom Search JSON API.
+    """Search the web via Tavily Search API.
 
-    Requires GOOGLE_API_KEY and GOOGLE_CSE_ID environment variables.
+    Requires TAVILY_API_KEY environment variable.
     Returns list of {title, link, snippet}.
     """
-    api_key = os.environ.get("GOOGLE_API_KEY", "").strip()
-    cse_id = os.environ.get("GOOGLE_CSE_ID", "").strip()
-    if not api_key or not cse_id:
+    api_key = os.environ.get("TAVILY_API_KEY", "").strip()
+    if not api_key:
         return []
 
-    from urllib.parse import urlencode
-
-    params = urlencode({
-        "key": api_key,
-        "cx": cse_id,
-        "q": query,
-        "num": min(num_results, 10),
-    })
-    url = f"https://www.googleapis.com/customsearch/v1?{params}"
-    req = urllib_request.Request(url, method="GET", headers={"Accept": "application/json"})
+    payload = {
+        "api_key": api_key,
+        "query": query,
+        "max_results": min(num_results, 10),
+        "search_depth": "advanced",
+        "include_answer": False,
+        "include_raw_content": False,
+    }
+    req = urllib_request.Request(
+        "https://api.tavily.com/search",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+    )
     try:
         with urllib_request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             results = []
-            for item in data.get("items", [])[:num_results]:
+            for item in data.get("results", [])[:num_results]:
                 results.append({
                     "title": str(item.get("title", "")),
-                    "link": str(item.get("link", "")),
-                    "snippet": str(item.get("snippet", "")),
+                    "link": str(item.get("url", "")),
+                    "snippet": str(item.get("content", "")),
                 })
             return results
+    except HTTPError:
+        return []
     except Exception:
         return []
 
@@ -723,7 +731,7 @@ def research_and_create_goals(
             for i, r in enumerate(search_results)
         )
     else:
-        research_text = "(No web search results available — Google API may not be configured. Rely on your own knowledge.)"
+        research_text = "(No web search results available — Tavily API may not be configured. Rely on your own knowledge.)"
 
     # Step 2: AI analysis + goal generation
     system_prompt = (
@@ -785,9 +793,9 @@ def research_and_create_goals(
         analysis = f"Found {len(search_results)} results for \"{clean_topic}\":\n\n"
         for i, r in enumerate(search_results):
             analysis += f"{i+1}. **{r['title']}** — {r['snippet']}\n"
-        analysis += "\n(AI provider not configured — showing raw results. Configure an API key for goal generation.)"
+        analysis += "\n(AI provider not configured — showing raw results. Configure an AI API key for goal generation.)"
     else:
-        analysis = "No search results and no AI provider configured. Set GOOGLE_API_KEY + GOOGLE_CSE_ID for web search, and an AI provider key for analysis."
+        analysis = "No search results and no AI provider configured. Set TAVILY_API_KEY for web search, and an AI provider key for analysis."
 
     return {
         "mode": "heuristic",

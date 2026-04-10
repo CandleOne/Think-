@@ -1498,13 +1498,14 @@ def get_schedule():
 @app.route('/api/ai/status')
 def ai_status():
     runtime = get_ai_runtime_info()
-    has_search = bool(os.environ.get('GOOGLE_API_KEY') and os.environ.get('GOOGLE_CSE_ID'))
+    has_search = bool(os.environ.get('TAVILY_API_KEY'))
     return jsonify({
         'ok': True,
         'provider': runtime['provider'],
         'model': runtime['model'],
         'configured': runtime['configured'],
         'web_search': has_search,
+        'web_search_provider': 'tavily' if has_search else None,
     })
 
 
