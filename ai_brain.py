@@ -779,6 +779,11 @@ def _heuristic_research_goals(
         for r in search_results[:6]
         if str((r or {}).get("snippet") or "").strip()
     ]
+    source_titles = [
+        str((r or {}).get("title") or "").strip()
+        for r in search_results[:6]
+        if str((r or {}).get("title") or "").strip()
+    ]
     merged_insight = " ".join(source_insights)[:400]
 
     description = (
@@ -847,16 +852,20 @@ def _heuristic_research_goals(
     daily_plan = _build_daily_plan_lines(instruction_steps, schedule_context, seed=0)
     schedule_fit_notes = _build_schedule_fit_notes(schedule_context, daily_plan)
 
+    ref_1 = source_titles[0] if len(source_titles) > 0 else f"core {clean_topic} reference"
+    ref_2 = source_titles[1] if len(source_titles) > 1 else f"intermediate {clean_topic} reference"
+    ref_3 = source_titles[2] if len(source_titles) > 2 else f"advanced {clean_topic} reference"
+
     subgoals = [
         {
-            "title": "Foundation: Core terminology and quality standards",
-            "description": "Build baseline knowledge and define objective quality criteria before advanced execution.",
+            "title": f"Foundation: Define standards for {clean_topic}",
+            "description": f"Build baseline knowledge and define objective quality criteria for {clean_topic} before advanced execution.",
             "time_commitment_hours": 5.0,
             "target_date_hint": "Week 1",
             "roadmap": [
-                "Collect 2-3 authoritative references and summarize core terms",
-                "Define measurable quality criteria for outcomes",
-                "Run one baseline diagnostic session and score results",
+                f"Review and summarize 2-3 references, starting with: {ref_1}",
+                f"Define measurable quality criteria for {clean_topic} outcomes",
+                f"Run one baseline diagnostic session for {clean_topic} and score results",
             ],
             "instruction_steps": [
                 "Create a one-page glossary/checklist",
@@ -865,12 +874,12 @@ def _heuristic_research_goals(
             ],
         },
         {
-            "title": "Skill Block 1: Fundamental technique drills",
-            "description": "Develop repeatable control on the core techniques through short, high-frequency drills.",
+            "title": f"Skill Block 1: Core drills for {clean_topic}",
+            "description": f"Develop repeatable control on the core techniques required for {clean_topic} through short, high-frequency drills.",
             "time_commitment_hours": 7.0,
             "target_date_hint": "Week 2",
             "roadmap": [
-                "Run 3-4 focused drill sessions on core mechanics",
+                f"Run 3-4 focused drill sessions aligned to: {ref_2}",
                 "Track error frequency and quality variance each session",
                 "Hit minimum consistency threshold before progression",
             ],
@@ -881,12 +890,12 @@ def _heuristic_research_goals(
             ],
         },
         {
-            "title": "Skill Block 2: Intermediate integration",
-            "description": "Combine fundamentals into end-to-end workflows under moderate complexity.",
+            "title": f"Skill Block 2: Intermediate integration for {clean_topic}",
+            "description": f"Combine fundamentals into end-to-end {clean_topic} workflows under moderate complexity.",
             "time_commitment_hours": 8.0,
             "target_date_hint": "Week 3",
             "roadmap": [
-                "Integrate multiple core skills into one complete run",
+                f"Integrate multiple core skills using patterns from: {ref_3}",
                 "Introduce one new complexity variable per session",
                 "Review and reduce failure points with targeted fixes",
             ],
@@ -897,8 +906,8 @@ def _heuristic_research_goals(
             ],
         },
         {
-            "title": "Application: Real-world constrained execution",
-            "description": "Perform under realistic constraints such as time limits and full workflow sequencing.",
+            "title": f"Application: Real-world execution for {clean_topic}",
+            "description": f"Perform {clean_topic} under realistic constraints such as time limits and full workflow sequencing.",
             "time_commitment_hours": 6.0,
             "target_date_hint": "Week 4",
             "roadmap": [
@@ -913,8 +922,8 @@ def _heuristic_research_goals(
             ],
         },
         {
-            "title": "Final Validation and Maintenance Plan",
-            "description": "Validate mastery and lock in a sustainable maintenance cadence.",
+            "title": f"Final Validation and Maintenance for {clean_topic}",
+            "description": f"Validate mastery of {clean_topic} and lock in a sustainable maintenance cadence.",
             "time_commitment_hours": 4.0,
             "target_date_hint": "Week 5-6",
             "roadmap": [
@@ -1181,6 +1190,8 @@ def research_and_create_goals(
         "You are a life optimization research assistant. "
         "The user wants to research a topic and create actionable goals from the findings. "
         "Analyze the provided web search results, synthesize key insights, and propose concrete goals. "
+        "All generated content must be specific to the exact research topic, not generic templates. "
+        "Use domain-specific terminology, techniques, tools, and milestones from the supplied search evidence. "
         "Return valid JSON with keys:\n"
         '  "analysis": string — 2-4 paragraph summary of what you found and key takeaways\n'
         '  "goals": array of objects, each with:\n'
