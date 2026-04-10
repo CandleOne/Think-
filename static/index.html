@@ -998,6 +998,8 @@ async function sendResearch() {
             <div class="rg-desc">${esc(g.description)}</div>
             ${renderDetailList('Roadmap', g.roadmap)}
             ${renderDetailList('Execution Instructions', g.instruction_steps)}
+            ${renderDetailList('Day-by-Day Hour Plan', g.daily_plan)}
+            ${renderDetailList('Schedule Fit Notes', g.schedule_fit_notes)}
             ${renderDetailList('Prerequisites', g.prerequisites)}
             ${renderDetailList('Shopping List', g.shopping_list)}
             ${renderDetailList('Context Notes', g.context_notes)}
@@ -1179,11 +1181,15 @@ async function createResearchLTO(sectionKey, options = {}) {
     if (g.time_commitment_hours) detailBits.push(`Estimated hours: ${g.time_commitment_hours}`);
     const roadmap = Array.isArray(g.roadmap) ? g.roadmap.map(v => String(v || '').trim()).filter(Boolean) : [];
     const instructions = Array.isArray(g.instruction_steps) ? g.instruction_steps.map(v => String(v || '').trim()).filter(Boolean) : [];
+    const dailyPlan = Array.isArray(g.daily_plan) ? g.daily_plan.map(v => String(v || '').trim()).filter(Boolean) : [];
+    const scheduleFitNotes = Array.isArray(g.schedule_fit_notes) ? g.schedule_fit_notes.map(v => String(v || '').trim()).filter(Boolean) : [];
     const prereqs = Array.isArray(g.prerequisites) ? g.prerequisites.map(v => String(v || '').trim()).filter(Boolean) : [];
     const shopping = Array.isArray(g.shopping_list) ? g.shopping_list.map(v => String(v || '').trim()).filter(Boolean) : [];
     const contextNotes = Array.isArray(g.context_notes) ? g.context_notes.map(v => String(v || '').trim()).filter(Boolean) : [];
     if (roadmap.length) detailBits.push('Roadmap:\n- ' + roadmap.join('\n- '));
     if (instructions.length) detailBits.push('Execution Instructions:\n- ' + instructions.join('\n- '));
+    if (dailyPlan.length) detailBits.push('Day-by-Day Hour Plan:\n- ' + dailyPlan.join('\n- '));
+    if (scheduleFitNotes.length) detailBits.push('Schedule Fit Notes:\n- ' + scheduleFitNotes.join('\n- '));
     if (prereqs.length) detailBits.push('Prerequisites:\n- ' + prereqs.join('\n- '));
     if (shopping.length) detailBits.push('Shopping List:\n- ' + shopping.join('\n- '));
     if (contextNotes.length) detailBits.push('Context Notes:\n- ' + contextNotes.join('\n- '));

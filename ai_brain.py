@@ -707,10 +707,68 @@ def web_search(query: str, num_results: int = 5) -> list[dict[str, str]]:
         return []
 
 
+def _parse_schedule_minutes(schedule_context: list[dict[str, Any]] | None) -> list[int]:
+    mins: list[int] = []
+    for item in schedule_context or []:
+        if not isinstance(item, dict):
+            continue
+        val = _parse_time_to_minutes(str(item.get("task_time") or ""))
+        if val is not None:
+            mins.append(val)
+    mins = sorted(set(mins))
+    return mins
+
+
+def _derive_hour_blocks(schedule_context: list[dict[str, Any]] | None) -> list[tuple[int, int]]:
+    mins = _parse_schedule_minutes(schedule_context)
+    blocks: list[tuple[int, int]] = []
+    if mins:
+        anchors = mins[:4]
+        for m in anchors:
+            blocks.append((m, m + 60))
+    else:
+        defaults = [7 * 60, 12 * 60 + 30, 18 * 60, 20 * 60 + 30]
+        blocks = [(m, m + 60) for m in defaults]
+    return blocks
+
+
+def _build_daily_plan_lines(
+    instruction_steps: list[str],
+    schedule_context: list[dict[str, Any]] | None,
+    seed: int = 0,
+) -> list[str]:
+    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    steps = [s for s in instruction_steps if s] or ["Execute focused practice for this objective"]
+    blocks = _derive_hour_blocks(schedule_context)
+    lines: list[str] = []
+    for i, day in enumerate(days):
+        start, end = blocks[(seed + i) % len(blocks)]
+        step = steps[(seed + i) % len(steps)]
+        lines.append(f"{day} {_minutes_to_12h(start)} - {_minutes_to_12h(end)}: {step}")
+    return lines
+
+
+def _build_schedule_fit_notes(
+    schedule_context: list[dict[str, Any]] | None,
+    daily_plan: list[str],
+) -> list[str]:
+    blocks = _derive_hour_blocks(schedule_context)
+    block_labels = [f"{_minutes_to_12h(s)}-{_minutes_to_12h(e)}" for s, e in blocks[:3]]
+    notes = [
+        f"Anchored to existing routine windows: {', '.join(block_labels)}.",
+        "Use these blocks after fixed schedule tasks to maintain consistency.",
+        "If a day is overloaded, move that session to the nearest matching block on the next day.",
+    ]
+    if daily_plan:
+        notes.append("Daily plan is ordered for progressive skill build and weekly consolidation.")
+    return notes
+
+
 def _heuristic_research_goals(
     topic: str,
     search_results: list[dict[str, str]],
     life_area_name: str | None = None,
+    schedule_context: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build practical fallback goals when an AI provider is not configured."""
     clean_topic = str(topic or "").strip() or "Research Topic"
@@ -782,6 +840,9 @@ def _heuristic_research_goals(
             "If blocked for 2+ sessions, reduce scope and keep cadence",
         ]
 
+        daily_plan = _build_daily_plan_lines(instruction_steps, schedule_context, seed=i)
+        schedule_fit_notes = _build_schedule_fit_notes(schedule_context, daily_plan)
+
         goals.append({
             "title": title,
             "description": description,
@@ -794,6 +855,8 @@ def _heuristic_research_goals(
             "prerequisites": prerequisites,
             "shopping_list": shopping_list,
             "context_notes": context_notes,
+            "daily_plan": daily_plan,
+            "schedule_fit_notes": schedule_fit_notes,
         })
 
     return goals
@@ -812,7 +875,13 @@ def _to_string_list(value: Any, max_items: int = 8) -> list[str]:
     return out
 
 
-def _normalize_research_goal(goal: dict[str, Any], topic: str, life_area_name: str | None = None) -> dict[str, Any] | None:
+def _normalize_research_goal(
+    goal: dict[str, Any],
+    topic: str,
+    life_area_name: str | None = None,
+    schedule_context: list[dict[str, Any]] | None = None,
+    seed: int = 0,
+) -> dict[str, Any] | None:
     title = str(goal.get("title") or "").strip()
     if not title:
         return None
@@ -828,6 +897,8 @@ def _normalize_research_goal(goal: dict[str, Any], topic: str, life_area_name: s
     prerequisites = _to_string_list(goal.get("prerequisites"), max_items=8)
     shopping_list = _to_string_list(goal.get("shopping_list"), max_items=12)
     context_notes = _to_string_list(goal.get("context_notes"), max_items=8)
+    daily_plan = _to_string_list(goal.get("daily_plan"), max_items=14)
+    schedule_fit_notes = _to_string_list(goal.get("schedule_fit_notes"), max_items=8)
 
     if not instruction_steps and roadmap:
         instruction_steps = [f"Execute: {step}" for step in roadmap[:4]]
@@ -844,6 +915,10 @@ def _normalize_research_goal(goal: dict[str, Any], topic: str, life_area_name: s
             f"Tailor execution to {area} priorities",
             "Keep scope small enough for consistent weekly completion",
         ]
+    if not daily_plan:
+        daily_plan = _build_daily_plan_lines(instruction_steps, schedule_context, seed=seed)
+    if not schedule_fit_notes:
+        schedule_fit_notes = _build_schedule_fit_notes(schedule_context, daily_plan)
 
     return {
         "title": title,
@@ -857,12 +932,15 @@ def _normalize_research_goal(goal: dict[str, Any], topic: str, life_area_name: s
         "prerequisites": prerequisites,
         "shopping_list": shopping_list,
         "context_notes": context_notes,
+        "daily_plan": daily_plan,
+        "schedule_fit_notes": schedule_fit_notes,
     }
 
 
 def research_and_create_goals(
     topic: str,
     life_area_name: str | None = None,
+    schedule_context: list[dict[str, Any]] | None = None,
     token_limit: int = 2000,
 ) -> dict[str, Any]:
     """Search the web for a topic, feed results to AI, and return goal suggestions.
@@ -870,7 +948,8 @@ def research_and_create_goals(
     Returns {mode, search_results, analysis, goals[]}.
     Each goal includes strategy metadata for execution:
     {title, description, priority, difficulty, time_commitment_hours, target_date_hint,
-     roadmap[], instruction_steps[], prerequisites[], shopping_list[], context_notes[]}.
+        roadmap[], instruction_steps[], prerequisites[], shopping_list[], context_notes[],
+        daily_plan[], schedule_fit_notes[]}.
     """
     clean_topic = str(topic or "").strip()
     if not clean_topic:
@@ -907,6 +986,8 @@ def research_and_create_goals(
         '    "prerequisites": array of prerequisite knowledge/dependencies\n'
         '    "shopping_list": array of required tools/materials (empty array if none)\n'
         '    "context_notes": array of caveats/tips/constraints important for this topic\n'
+        '    "daily_plan": array of 5-7 entries in day-by-day hour-by-hour format (example: "Monday 7:00 PM - 8:00 PM: knife drills")\n'
+        '    "schedule_fit_notes": array describing how this goal fits around the existing daily schedule and what to adjust if conflicts occur\n'
         "Propose 3-6 goals that are specific, measurable, and build on each other."
     )
 
@@ -916,6 +997,7 @@ def research_and_create_goals(
         "research_topic": clean_topic,
         "search_results": research_text,
         "life_area": life_area_name or "General",
+        "schedule_context": schedule_context or [],
         "instructions": f"Research this topic and create actionable goals.{area_note}",
     }, ensure_ascii=True)
 
@@ -926,10 +1008,16 @@ def research_and_create_goals(
         analysis = str(llm_result.get("analysis") or "").strip()
         raw_goals = llm_result.get("goals") if isinstance(llm_result.get("goals"), list) else []
         goals = []
-        for g in raw_goals:
+        for i, g in enumerate(raw_goals):
             if not isinstance(g, dict):
                 continue
-            normalized = _normalize_research_goal(g, clean_topic, life_area_name=life_area_name)
+            normalized = _normalize_research_goal(
+                g,
+                clean_topic,
+                life_area_name=life_area_name,
+                schedule_context=schedule_context,
+                seed=i,
+            )
             if normalized:
                 goals.append(normalized)
         if analysis or goals:
@@ -941,7 +1029,12 @@ def research_and_create_goals(
             }
 
     # Heuristic fallback
-    fallback_goals = _heuristic_research_goals(clean_topic, search_results, life_area_name=life_area_name)
+    fallback_goals = _heuristic_research_goals(
+        clean_topic,
+        search_results,
+        life_area_name=life_area_name,
+        schedule_context=schedule_context,
+    )
     if search_results:
         analysis = f"Found {len(search_results)} results for \"{clean_topic}\":\n\n"
         for i, r in enumerate(search_results):

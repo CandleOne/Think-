@@ -1528,16 +1528,32 @@ def ai_research():
     except (TypeError, ValueError):
         pass
 
-    # Resolve life area name for context
+    # Resolve life area and fetch schedule context so research goals can fit real routine windows.
     life_area_name = None
-    if life_area_id:
-        db = get_db()
-        area = db.execute('SELECT name FROM life_areas WHERE id=?', (life_area_id,)).fetchone()
-        if area:
-            life_area_name = area['name']
-        db.close()
+    schedule_context = []
+    db_ctx = get_db()
+    try:
+        if life_area_id:
+            area = db_ctx.execute('SELECT name FROM life_areas WHERE id=?', (life_area_id,)).fetchone()
+            if area:
+                life_area_name = area['name']
 
-    result = research_and_create_goals(topic, life_area_name=life_area_name, token_limit=token_limit)
+        schedule_context = rows_to_list(db_ctx.execute('''
+            SELECT ci.section_key, ci.name, ci.task_time, ci.subgroup, ci.task_interval, ci.sort_order
+            FROM custom_items ci
+            JOIN sidebar_sections ss ON ss.page_key = ci.section_key
+            WHERE ss.is_schedule = 1 AND ci.is_task = 1
+            ORDER BY ci.section_key, ci.sort_order, ci.id
+        ''').fetchall())
+    finally:
+        db_ctx.close()
+
+    result = research_and_create_goals(
+        topic,
+        life_area_name=life_area_name,
+        schedule_context=schedule_context,
+        token_limit=token_limit,
+    )
 
     def _fmt_list(title, items):
         vals = [str(x).strip() for x in (items or []) if str(x).strip()]
@@ -1550,6 +1566,8 @@ def ai_research():
         text = base or 'Actionable roadmap generated from research.'
         text += _fmt_list('Roadmap', goal_obj.get('roadmap'))
         text += _fmt_list('Execution Instructions', goal_obj.get('instruction_steps'))
+        text += _fmt_list('Day-by-Day Hour Plan', goal_obj.get('daily_plan'))
+        text += _fmt_list('Schedule Fit Notes', goal_obj.get('schedule_fit_notes'))
         text += _fmt_list('Prerequisites', goal_obj.get('prerequisites'))
         text += _fmt_list('Shopping List', goal_obj.get('shopping_list'))
         text += _fmt_list('Context Notes', goal_obj.get('context_notes'))
