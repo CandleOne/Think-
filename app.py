@@ -1401,53 +1401,15 @@ def search_all_items():
         ''', (like, like)).fetchall()))
 
         results.extend(rows_to_list(db.execute('''
-            SELECT 'purchase' AS source, v.item_id AS item_id, v.name AS title,
-                   COALESCE(v.category, v.item_type, 'Purchases') AS subtitle,
-                   'purchases' AS page_key, NULL AS section_key
+            SELECT v.item_type AS source, NULL AS item_id, v.name AS title,
+                   COALESCE(v.category, v.status_desc, v.item_type) AS subtitle,
+                   v.item_type AS page_key, NULL AS section_key
             FROM v_all_purchases v
             WHERE LOWER(v.name) LIKE ?
                OR LOWER(COALESCE(v.category, '')) LIKE ?
                OR LOWER(COALESCE(v.item_type, '')) LIKE ?
             LIMIT 80
         ''', (like, like, like)).fetchall()))
-
-        results.extend(rows_to_list(db.execute('''
-            SELECT 'fashion' AS source, f.id AS item_id, f.name AS title,
-                   COALESCE(fc.name, 'Fashion') AS subtitle,
-                   'fashion' AS page_key, NULL AS section_key
-            FROM fashion_items f
-            LEFT JOIN fashion_categories fc ON fc.id = f.category_id
-            WHERE LOWER(f.name) LIKE ? OR LOWER(COALESCE(f.notes, '')) LIKE ?
-            LIMIT 40
-        ''', (like, like)).fetchall()))
-
-        results.extend(rows_to_list(db.execute('''
-            SELECT 'skincare' AS source, sp.id AS item_id, sp.name AS title,
-                   COALESCE(sr.name, 'Skincare') AS subtitle,
-                   'skincare' AS page_key, NULL AS section_key
-            FROM skincare_products sp
-            LEFT JOIN skincare_routines sr ON sr.id = sp.routine_id
-            WHERE LOWER(sp.name) LIKE ? OR LOWER(COALESCE(sp.notes, '')) LIKE ?
-            LIMIT 40
-        ''', (like, like)).fetchall()))
-
-        results.extend(rows_to_list(db.execute('''
-            SELECT 'pharmacology' AS source, p.id AS item_id, p.name AS title,
-                   COALESCE(p.dosage, 'Pharmacology') AS subtitle,
-                   'pharmacology' AS page_key, NULL AS section_key
-            FROM pharmacology_items p
-            WHERE LOWER(p.name) LIKE ? OR LOWER(COALESCE(p.notes, '')) LIKE ?
-            LIMIT 40
-        ''', (like, like)).fetchall()))
-
-        results.extend(rows_to_list(db.execute('''
-            SELECT 'misc' AS source, m.id AS item_id, m.name AS title,
-                   COALESCE(m.category, 'Misc') AS subtitle,
-                   'misc' AS page_key, NULL AS section_key
-            FROM misc_items m
-            WHERE LOWER(m.name) LIKE ? OR LOWER(COALESCE(m.notes, '')) LIKE ?
-            LIMIT 40
-        ''', (like, like)).fetchall()))
     finally:
         db.close()
 
