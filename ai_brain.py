@@ -847,6 +847,93 @@ def _heuristic_research_goals(
     daily_plan = _build_daily_plan_lines(instruction_steps, schedule_context, seed=0)
     schedule_fit_notes = _build_schedule_fit_notes(schedule_context, daily_plan)
 
+    subgoals = [
+        {
+            "title": "Foundation: Core terminology and quality standards",
+            "description": "Build baseline knowledge and define objective quality criteria before advanced execution.",
+            "time_commitment_hours": 5.0,
+            "target_date_hint": "Week 1",
+            "roadmap": [
+                "Collect 2-3 authoritative references and summarize core terms",
+                "Define measurable quality criteria for outcomes",
+                "Run one baseline diagnostic session and score results",
+            ],
+            "instruction_steps": [
+                "Create a one-page glossary/checklist",
+                "Score baseline performance using your quality criteria",
+                "List top 3 weaknesses to target in next subgoal",
+            ],
+        },
+        {
+            "title": "Skill Block 1: Fundamental technique drills",
+            "description": "Develop repeatable control on the core techniques through short, high-frequency drills.",
+            "time_commitment_hours": 7.0,
+            "target_date_hint": "Week 2",
+            "roadmap": [
+                "Run 3-4 focused drill sessions on core mechanics",
+                "Track error frequency and quality variance each session",
+                "Hit minimum consistency threshold before progression",
+            ],
+            "instruction_steps": [
+                "Use timer-based practice blocks",
+                "Record one video/photo sample per session for review",
+                "Repeat weak drill at the end of each session",
+            ],
+        },
+        {
+            "title": "Skill Block 2: Intermediate integration",
+            "description": "Combine fundamentals into end-to-end workflows under moderate complexity.",
+            "time_commitment_hours": 8.0,
+            "target_date_hint": "Week 3",
+            "roadmap": [
+                "Integrate multiple core skills into one complete run",
+                "Introduce one new complexity variable per session",
+                "Review and reduce failure points with targeted fixes",
+            ],
+            "instruction_steps": [
+                "Start each session with a quick fundamentals warmup",
+                "Run complete workflow twice with quality scoring",
+                "Log and patch top recurring bottleneck",
+            ],
+        },
+        {
+            "title": "Application: Real-world constrained execution",
+            "description": "Perform under realistic constraints such as time limits and full workflow sequencing.",
+            "time_commitment_hours": 6.0,
+            "target_date_hint": "Week 4",
+            "roadmap": [
+                "Simulate production/real-world context with strict timing",
+                "Execute full workflow with quality + speed targets",
+                "Compare outcomes against predefined completion criteria",
+            ],
+            "instruction_steps": [
+                "Set hard start/end times for each run",
+                "Use post-run rubric scoring and notes",
+                "Iterate one parameter only between runs",
+            ],
+        },
+        {
+            "title": "Final Validation and Maintenance Plan",
+            "description": "Validate mastery and lock in a sustainable maintenance cadence.",
+            "time_commitment_hours": 4.0,
+            "target_date_hint": "Week 5-6",
+            "roadmap": [
+                "Run a final benchmark session against target criteria",
+                "Document repeatable SOP/checklist",
+                "Define weekly maintenance and monthly progression review",
+            ],
+            "instruction_steps": [
+                "Score final benchmark and compare to baseline",
+                "Finalize SOP and keep it versioned",
+                "Schedule recurring review sessions in calendar",
+            ],
+        },
+    ]
+
+    for i, sg in enumerate(subgoals):
+        sg_steps = _to_string_list(sg.get("instruction_steps"), max_items=10)
+        sg["daily_plan"] = _build_daily_plan_lines(sg_steps, schedule_context, seed=i)
+
     return [{
         "title": f"Master Plan: {clean_topic}",
         "description": description,
@@ -861,6 +948,7 @@ def _heuristic_research_goals(
         "context_notes": context_notes,
         "daily_plan": daily_plan,
         "schedule_fit_notes": schedule_fit_notes,
+        "subgoals": subgoals,
     }]
 
 
@@ -922,6 +1010,49 @@ def _normalize_research_goal(
     if not schedule_fit_notes:
         schedule_fit_notes = _build_schedule_fit_notes(schedule_context, daily_plan)
 
+    raw_subgoals = goal.get("subgoals") if isinstance(goal.get("subgoals"), list) else []
+    subgoals: list[dict[str, Any]] = []
+    for idx, sg in enumerate(raw_subgoals[:14]):
+        if not isinstance(sg, dict):
+            continue
+        sg_title = str(sg.get("title") or "").strip()
+        if not sg_title:
+            continue
+        sg_desc = str(sg.get("description") or "").strip()
+        sg_roadmap = _to_string_list(sg.get("roadmap"), max_items=14)
+        sg_steps = _to_string_list(sg.get("instruction_steps"), max_items=16)
+        sg_daily = _to_string_list(sg.get("daily_plan"), max_items=10)
+        if not sg_daily:
+            sg_daily = _build_daily_plan_lines(sg_steps or instruction_steps, schedule_context, seed=seed + idx)
+        subgoals.append({
+            "title": sg_title,
+            "description": sg_desc,
+            "time_commitment_hours": max(0, float(sg.get("time_commitment_hours") or 0)),
+            "target_date_hint": str(sg.get("target_date_hint") or "").strip(),
+            "roadmap": sg_roadmap,
+            "instruction_steps": sg_steps,
+            "daily_plan": sg_daily,
+        })
+
+    if not subgoals:
+        # Derive chapter-like subgoals from roadmap chunks when model omits subgoals.
+        chunk_size = 3
+        for idx in range(0, len(roadmap), chunk_size):
+            chunk = roadmap[idx:idx + chunk_size]
+            if not chunk:
+                continue
+            title_idx = (idx // chunk_size) + 1
+            sg_steps = [f"Execute milestone: {step}" for step in chunk]
+            subgoals.append({
+                "title": f"Subgoal {title_idx}: {chunk[0][:80]}",
+                "description": "Focused execution block derived from the master roadmap.",
+                "time_commitment_hours": 0.0,
+                "target_date_hint": "",
+                "roadmap": chunk,
+                "instruction_steps": sg_steps,
+                "daily_plan": _build_daily_plan_lines(sg_steps, schedule_context, seed=seed + title_idx),
+            })
+
     return {
         "title": title,
         "description": description,
@@ -936,6 +1067,7 @@ def _normalize_research_goal(
         "context_notes": context_notes,
         "daily_plan": daily_plan,
         "schedule_fit_notes": schedule_fit_notes,
+        "subgoals": subgoals,
     }
 
 
@@ -976,6 +1108,7 @@ def _consolidate_research_goals(goals: list[dict[str, Any]], topic: str) -> list
     context: list[str] = []
     daily: list[str] = []
     fit: list[str] = []
+    subgoals: list[dict[str, Any]] = []
 
     for g in goals:
         roadmap = merge_unique(roadmap, _to_string_list(g.get("roadmap"), 28), 28)
@@ -985,6 +1118,21 @@ def _consolidate_research_goals(goals: list[dict[str, Any]], topic: str) -> list
         context = merge_unique(context, _to_string_list(g.get("context_notes"), 14), 14)
         daily = merge_unique(daily, _to_string_list(g.get("daily_plan"), 28), 28)
         fit = merge_unique(fit, _to_string_list(g.get("schedule_fit_notes"), 14), 14)
+        for sg in (g.get("subgoals") if isinstance(g.get("subgoals"), list) else []):
+            if not isinstance(sg, dict):
+                continue
+            sg_title = str(sg.get("title") or "").strip()
+            if not sg_title:
+                continue
+            subgoals.append({
+                "title": sg_title,
+                "description": str(sg.get("description") or "").strip(),
+                "time_commitment_hours": max(0, float(sg.get("time_commitment_hours") or 0)),
+                "target_date_hint": str(sg.get("target_date_hint") or "").strip(),
+                "roadmap": _to_string_list(sg.get("roadmap"), 14),
+                "instruction_steps": _to_string_list(sg.get("instruction_steps"), 16),
+                "daily_plan": _to_string_list(sg.get("daily_plan"), 10),
+            })
 
     primary["roadmap"] = roadmap
     primary["instruction_steps"] = instructions
@@ -993,6 +1141,8 @@ def _consolidate_research_goals(goals: list[dict[str, Any]], topic: str) -> list
     primary["context_notes"] = context
     primary["daily_plan"] = daily
     primary["schedule_fit_notes"] = fit
+    if subgoals:
+        primary["subgoals"] = subgoals[:14]
     return [primary]
 
 
@@ -1047,6 +1197,7 @@ def research_and_create_goals(
         '    "context_notes": array of caveats/tips/constraints important for this topic\n'
         '    "daily_plan": array of 5-7 entries in day-by-day hour-by-hour format (example: "Monday 7:00 PM - 8:00 PM: knife drills")\n'
         '    "schedule_fit_notes": array describing how this goal fits around the existing daily schedule and what to adjust if conflicts occur\n'
+        '    "subgoals": array of 4-12 detailed subgoal objects, each with title, description, roadmap[], instruction_steps[], daily_plan[], time_commitment_hours, target_date_hint\n'
         "Return exactly 1 goal object with a single comprehensive detailed roadmap, not multiple separate goal roadmaps."
     )
 

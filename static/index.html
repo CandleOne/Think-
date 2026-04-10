@@ -966,6 +966,21 @@ async function sendResearch() {
     return `<div class="rg-desc" style="margin-top:8px"><strong>${esc(label)}:</strong><ul style="margin:6px 0 0 18px">${vals.map(v => `<li>${esc(v)}</li>`).join('')}</ul></div>`;
   };
 
+  const renderSubgoals = (goal) => {
+    const subgoals = Array.isArray(goal?.subgoals) ? goal.subgoals : [];
+    if (!subgoals.length) return '';
+    return `<div class="rg-desc" style="margin-top:10px"><strong>Subgoals:</strong>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px;">
+        ${subgoals.map((sg, idx) => `
+          <div style="border:1px solid var(--border);border-radius:6px;padding:8px;background:var(--surface);">
+            <div style="font-size:13px;font-weight:600;">${idx + 1}. ${esc(String(sg?.title || 'Subgoal'))}</div>
+            ${sg?.description ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${esc(String(sg.description))}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>`;
+  };
+
   let html = '';
 
   // Search results
@@ -1000,6 +1015,7 @@ async function sendResearch() {
             ${renderDetailList('Execution Instructions', g.instruction_steps)}
             ${renderDetailList('Day-by-Day Hour Plan', g.daily_plan)}
             ${renderDetailList('Schedule Fit Notes', g.schedule_fit_notes)}
+            ${renderSubgoals(g)}
             ${renderDetailList('Prerequisites', g.prerequisites)}
             ${renderDetailList('Shopping List', g.shopping_list)}
             ${renderDetailList('Context Notes', g.context_notes)}
@@ -1193,6 +1209,58 @@ async function createResearchLTO(sectionKey, options = {}) {
     if (prereqs.length) detailBits.push('Prerequisites:\n- ' + prereqs.join('\n- '));
     if (shopping.length) detailBits.push('Shopping List:\n- ' + shopping.join('\n- '));
     if (contextNotes.length) detailBits.push('Context Notes:\n- ' + contextNotes.join('\n- '));
+
+    const subgoals = Array.isArray(g.subgoals) ? g.subgoals : [];
+    if (subgoals.length) {
+      // Insert a visual group header so subgoals render as a roadmap section.
+      const headerRes = await api('custom/' + sectionKey, {
+        method: 'POST',
+        body: {
+          name: '━━━ ' + title,
+          status_id: Number(status.id),
+          notes: 'AI-generated subgoal roadmap section',
+          is_long_term_objective: 0,
+        },
+      });
+      if (apiHasError(headerRes)) failed += 1;
+
+      for (const [idx, sg] of subgoals.entries()) {
+        const sgTitle = String(sg?.title || '').trim();
+        if (!sgTitle) {
+          failed += 1;
+          continue;
+        }
+        const sgBits = [];
+        if (sg.description) sgBits.push(String(sg.description).trim());
+        const sgRoadmap = Array.isArray(sg.roadmap) ? sg.roadmap.map(v => String(v || '').trim()).filter(Boolean) : [];
+        const sgSteps = Array.isArray(sg.instruction_steps) ? sg.instruction_steps.map(v => String(v || '').trim()).filter(Boolean) : [];
+        const sgDaily = Array.isArray(sg.daily_plan) ? sg.daily_plan.map(v => String(v || '').trim()).filter(Boolean) : [];
+        if (sg.target_date_hint) sgBits.push(`Target hint: ${sg.target_date_hint}`);
+        if (sg.time_commitment_hours) sgBits.push(`Estimated hours: ${sg.time_commitment_hours}`);
+        if (sgRoadmap.length) sgBits.push('Subgoal Roadmap:\n- ' + sgRoadmap.join('\n- '));
+        if (sgSteps.length) sgBits.push('Subgoal Execution Instructions:\n- ' + sgSteps.join('\n- '));
+        if (sgDaily.length) sgBits.push('Subgoal Day-by-Day Hour Plan:\n- ' + sgDaily.join('\n- '));
+        if (scheduleFitNotes.length) sgBits.push('Schedule Fit Notes:\n- ' + scheduleFitNotes.join('\n- '));
+        if (prereqs.length) sgBits.push('Prerequisites:\n- ' + prereqs.join('\n- '));
+        if (shopping.length) sgBits.push('Shopping List:\n- ' + shopping.join('\n- '));
+        if (contextNotes.length) sgBits.push('Context Notes:\n- ' + contextNotes.join('\n- '));
+        sgBits.push(`Parent roadmap: ${title}`);
+        sgBits.push(`Source topic: ${window._lastResearchTopic || 'Research'}`);
+
+        const resSub = await api('custom/' + sectionKey, {
+          method: 'POST',
+          body: {
+            name: `${idx + 1}. ${sgTitle}`,
+            status_id: Number(status.id),
+            notes: sgBits.join('\n\n'),
+            is_long_term_objective: 1,
+          },
+        });
+        if (apiHasError(resSub)) failed += 1;
+        else created += 1;
+      }
+      continue;
+    }
 
     const res = await api('custom/' + sectionKey, {
       method: 'POST',

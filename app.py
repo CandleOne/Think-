@@ -1568,6 +1568,20 @@ def ai_research():
         text += _fmt_list('Execution Instructions', goal_obj.get('instruction_steps'))
         text += _fmt_list('Day-by-Day Hour Plan', goal_obj.get('daily_plan'))
         text += _fmt_list('Schedule Fit Notes', goal_obj.get('schedule_fit_notes'))
+        subgoals = goal_obj.get('subgoals') if isinstance(goal_obj.get('subgoals'), list) else []
+        for i, sg in enumerate(subgoals, start=1):
+            if not isinstance(sg, dict):
+                continue
+            st = str(sg.get('title') or '').strip()
+            if not st:
+                continue
+            text += f"\n\nSubgoal {i}: {st}"
+            sd = str(sg.get('description') or '').strip()
+            if sd:
+                text += f"\n{sd}"
+            text += _fmt_list('Subgoal Roadmap', sg.get('roadmap'))
+            text += _fmt_list('Subgoal Execution Instructions', sg.get('instruction_steps'))
+            text += _fmt_list('Subgoal Day-by-Day Hour Plan', sg.get('daily_plan'))
         text += _fmt_list('Prerequisites', goal_obj.get('prerequisites'))
         text += _fmt_list('Shopping List', goal_obj.get('shopping_list'))
         text += _fmt_list('Context Notes', goal_obj.get('context_notes'))
