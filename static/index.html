@@ -1176,8 +1176,9 @@ async function createResearchLTO(sectionKey, options = {}) {
     return;
   }
 
-  const status = statuses.find(s => String(s.color || '').toLowerCase() === 'blue') || statuses[0];
-  if (!status || !status.id) {
+  const statusBlue = statuses.find(s => String(s.color || '').toLowerCase() === 'blue') || statuses[0];
+  const statusGreen = statuses.find(s => String(s.color || '').toLowerCase() === 'green') || statusBlue;
+  if (!statusBlue || !statusBlue.id) {
     toast('No statuses available to create LTO items');
     return;
   }
@@ -1240,7 +1241,7 @@ async function createResearchLTO(sectionKey, options = {}) {
         method: 'POST',
         body: {
           name: '━━━ ' + title,
-          status_id: Number(status.id),
+          status_id: Number(statusBlue.id),
           notes: 'AI-generated subgoal roadmap section',
           is_long_term_objective: 0,
           sort_order: nextSortOrder++,
@@ -1275,7 +1276,7 @@ async function createResearchLTO(sectionKey, options = {}) {
           method: 'POST',
           body: {
             name: `${idx + 1}. ${sgTitle}`,
-            status_id: Number(status.id),
+            status_id: Number((idx === 0 ? statusGreen : statusBlue).id),
             notes: sgBits.join('\n\n'),
             is_long_term_objective: 1,
             sort_order: nextSortOrder++,
@@ -1291,7 +1292,7 @@ async function createResearchLTO(sectionKey, options = {}) {
       method: 'POST',
       body: {
         name: title,
-        status_id: Number(status.id),
+        status_id: Number(statusGreen.id),
         notes: detailBits.join('\n\n'),
         is_long_term_objective: 1,
         sort_order: nextSortOrder++,
