@@ -1036,25 +1036,45 @@ async function createResearchGoals() {
 }
 
 function openCreateLtoModal() {
-  const ltoSections = sidebarSections.filter(s => Number(s.is_long_term_section || 0) === 1);
-  if (!ltoSections.length) {
-    toast('No long-term objective section found. Add one first from the sidebar.');
+  const topic = String(window._lastResearchTopic || '').trim();
+  if (!topic) {
+    toast('Run research first to generate goals');
     return;
   }
 
-  if (ltoSections.length === 1) {
-    createResearchLTO(ltoSections[0].page_key);
-    return;
-  }
+  const ltoSections = sidebarSections.filter(s => Number(s.is_long_term_section || 0) === 1);
+  const defaultLabel = `${topic.slice(0, 56)} LTO`;
 
   openModal(`
     <h3>Create LTO</h3>
     <form id="research-lto-form">
       <div class="form-group">
+        <label style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
+          <input type="radio" name="target_mode" value="new" checked onchange="toggleResearchLtoMode()">
+          <span>Create a new long-term section for this research</span>
+        </label>
+        <label style="display:flex;gap:10px;align-items:center">
+          <input type="radio" name="target_mode" value="existing" onchange="toggleResearchLtoMode()" ${ltoSections.length ? '' : 'disabled'}>
+          <span>${ltoSections.length ? 'Use an existing long-term section' : 'No existing long-term sections available'}</span>
+        </label>
+      </div>
+      <div id="research-lto-new-fields">
+        <div class="form-group">
+          <label>Group Name</label>
+          <input name="group_name" value="AI Research" maxlength="50">
+        </div>
+        <div class="form-group">
+          <label>Section Name</label>
+          <input name="section_label" value="${esc(defaultLabel)}" maxlength="80" required>
+        </div>
+      </div>
+      <div id="research-lto-existing-fields" style="display:none">
+      <div class="form-group">
         <label>Target Long-Term Section</label>
-        <select name="section_key">
+        <select name="section_key" ${ltoSections.length ? '' : 'disabled'}>
           ${ltoSections.map(s => `<option value="${esc(s.page_key)}">${esc(s.group_name)} · ${esc(s.label)}</option>`).join('')}
         </select>
+      </div>
       </div>
     </form>
     <div class="modal-actions">
@@ -1063,18 +1083,60 @@ function openCreateLtoModal() {
     </div>`);
 }
 
+function toggleResearchLtoMode() {
+  const form = document.getElementById('research-lto-form');
+  if (!form) return;
+  const mode = form.target_mode ? String(form.target_mode.value || 'new') : 'new';
+  const newFields = document.getElementById('research-lto-new-fields');
+  const existingFields = document.getElementById('research-lto-existing-fields');
+  if (newFields) newFields.style.display = mode === 'new' ? 'block' : 'none';
+  if (existingFields) existingFields.style.display = mode === 'existing' ? 'block' : 'none';
+}
+
 async function confirmCreateResearchLTO() {
   const form = document.getElementById('research-lto-form');
   if (!form) return;
+  const mode = form.target_mode ? String(form.target_mode.value || 'new') : 'new';
+
+  if (mode === 'new') {
+    const groupName = form.group_name ? String(form.group_name.value || '').trim() : '';
+    const sectionLabel = form.section_label ? String(form.section_label.value || '').trim() : '';
+    if (!groupName) {
+      toast('Enter a group name');
+      return;
+    }
+    if (!sectionLabel) {
+      toast('Enter a section name');
+      return;
+    }
+
+    const sectionRes = await api('sidebar', {
+      method: 'POST',
+      body: {
+        group_name: groupName,
+        label: sectionLabel,
+        section_type: 'long_term_objective',
+      },
+    });
+    if (showApiError(sectionRes)) return;
+    const sectionKey = String(sectionRes.page_key || '').trim();
+    if (!sectionKey) {
+      toast('Created section but missing page key');
+      return;
+    }
+    await createResearchLTO(sectionKey, { navigateToSection: true });
+    return;
+  }
+
   const sectionKey = form.section_key ? String(form.section_key.value || '').trim() : '';
   if (!sectionKey) {
     toast('Select a target section');
     return;
   }
-  await createResearchLTO(sectionKey);
+  await createResearchLTO(sectionKey, { navigateToSection: true });
 }
 
-async function createResearchLTO(sectionKey) {
+async function createResearchLTO(sectionKey, options = {}) {
   const goals = Array.isArray(window._lastResearchSuggestedGoals) ? window._lastResearchSuggestedGoals : [];
   if (!goals.length) {
     toast('Run research first to generate goals');
@@ -1125,7 +1187,11 @@ async function createResearchLTO(sectionKey) {
 
   if (created) {
     await refreshCoreData();
-    await loadPage(currentPage);
+    if (options && options.navigateToSection) {
+      navigateTo(sectionKey);
+    } else {
+      await loadPage(currentPage);
+    }
   }
 }
 
