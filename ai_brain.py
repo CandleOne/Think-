@@ -764,6 +764,403 @@ def _build_schedule_fit_notes(
     return notes
 
 
+# ── Query normalisation ────────────────────────────────────────────────────────
+
+_STRIP_PREFIXES = re.compile(
+    r"^(?:i\s+want\s+to|i\s+would\s+like\s+to|i(?:'d|\s+would)\s+like\s+to"
+    r"|help\s+me|please\s+help\s+me|can\s+you|could\s+you|i\s+need\s+to"
+    r"|i\s+am\s+trying\s+to|i(?:'m|\s+am)\s+looking\s+to"
+    r"|show\s+me\s+how\s+to|teach\s+me\s+(?:how\s+to\s+)?"
+    r"|let(?:'s|\s+us)|i(?:'d|\s+would)\s+love\s+to)\s+",
+    re.IGNORECASE,
+)
+
+_STRIP_SUFFIXES = re.compile(
+    r"\.\s*(?:create|make|build|generate|give\s+me|set\s+up|produce)"
+    r".*?(?:goal|plan|roadmap|objective|lto|schedule|checklist).*$",
+    re.IGNORECASE,
+)
+
+_TIME_PHRASES = re.compile(
+    r"\b(?:over\s+the\s+next|within\s+(?:the\s+next\s+)?"
+    r"|in\s+(?:the\s+next\s+)?|for\s+(?:the\s+next\s+)?)"
+    r"\s*\d*\s*(?:day|week|month|year)s?\b",
+    re.IGNORECASE,
+)
+
+_FLUFF = re.compile(
+    r"\b(?:really|actually|basically|just|definitely|maybe"
+    r"|as\s+soon\s+as\s+possible|asap)\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_topic(raw: str) -> str:
+    """Distill a conversational prompt into a concise topic phrase.
+
+    e.g. "i want to learn the basics of making sushi over the next month.
+          create a long term goal for me to do that"
+    → "learn the basics of making sushi"
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return "Research Topic"
+
+    # Remove trailing goal-creation requests
+    text = _STRIP_SUFFIXES.sub("", text).strip().rstrip(".")
+
+    # Remove conversational prefixes
+    text = _STRIP_PREFIXES.sub("", text).strip()
+
+    # Remove timeframe qualifiers
+    text = _TIME_PHRASES.sub("", text).strip()
+
+    # Remove filler words
+    text = _FLUFF.sub("", text).strip()
+
+    # Collapse whitespace
+    text = re.sub(r"\s{2,}", " ", text).strip(" .,;:!?")
+
+    # Capitalize nicely
+    if text:
+        text = text[0].upper() + text[1:]
+
+    return text or "Research Topic"
+
+
+# ── Domain-specific heuristic content ──────────────────────────────────────────
+
+def _domain_heuristics(topic: str, source_titles: list[str]) -> dict[str, Any]:
+    """Return domain-specific subgoals, shopping list, prerequisites, etc."""
+    t = topic.lower()
+    ref_1 = source_titles[0] if len(source_titles) > 0 else f"core {topic} reference"
+    ref_2 = source_titles[1] if len(source_titles) > 1 else f"intermediate {topic} reference"
+    ref_3 = source_titles[2] if len(source_titles) > 2 else f"advanced {topic} reference"
+
+    # --- Sushi / Japanese cooking ---
+    if any(k in t for k in ["sushi", "maki", "nigiri", "sashimi"]):
+        return {
+            "shopping_list": [
+                "Sushi-grade fish (salmon, tuna) from a trusted fishmonger",
+                "Short-grain Japanese rice (Koshihikari or Calrose)",
+                "Rice vinegar, sugar, salt for seasoning",
+                "Nori (roasted seaweed sheets)",
+                "Bamboo rolling mat (makisu)",
+                "Sharp sushi knife (yanagiba or santoku)",
+                "Rice paddle (shamoji) and hangiri (wooden bowl) or large flat bowl",
+                "Soy sauce, wasabi, pickled ginger (gari)",
+                "Plastic wrap and damp towel for rolling",
+            ],
+            "prerequisites": [
+                "Basic kitchen knife safety and cutting technique",
+                "Ability to cook rice on stovetop or rice cooker",
+                "Understanding of food safety for raw fish handling",
+                "Access to a clean, spacious work surface",
+            ],
+            "subgoals": [
+                {
+                    "title": "Foundation: Master sushi rice preparation",
+                    "description": "Learn to cook, season, and cool sushi rice to the correct texture and flavour — the single most important sushi skill.",
+                    "time_commitment_hours": 4.0,
+                    "target_date_hint": "Week 1",
+                    "roadmap": [
+                        f"Study rice preparation fundamentals from: {ref_1}",
+                        "Practice rinsing, soaking, and cooking short-grain rice 3 times",
+                        "Mix seasoned vinegar (su) and fan rice to body temperature",
+                        "Taste-test and adjust vinegar-sugar-salt ratio",
+                    ],
+                    "instruction_steps": [
+                        "Rinse rice until water runs clear (4-5 washes)",
+                        "Soak 30 min, cook at 1:1 water ratio",
+                        "Mix vinegar while rice is hot using cutting motions",
+                        "Fan rice to cool to body temp — grains should be glossy, not mushy",
+                    ],
+                },
+                {
+                    "title": "Knife skills and fish preparation",
+                    "description": "Develop safe, clean slicing technique for raw fish fillets — proper cuts affect texture and presentation.",
+                    "time_commitment_hours": 5.0,
+                    "target_date_hint": "Week 1-2",
+                    "roadmap": [
+                        f"Review knife technique references: {ref_2}",
+                        "Practice pulling cuts on cucumber and avocado",
+                        "Slice salmon fillet into nigiri-sized pieces (finger width, 3mm thick)",
+                        "Practice consistent slice angle and thickness",
+                    ],
+                    "instruction_steps": [
+                        "Sharpen knife before each session",
+                        "Use a single long pulling stroke — never saw back and forth",
+                        "Keep fish cold; return to fridge between batches",
+                        "Aim for uniform 3mm slices at 20-degree angle",
+                    ],
+                },
+                {
+                    "title": "Maki rolls: basic rolling technique",
+                    "description": "Learn to assemble and roll hosomaki (thin rolls) and futomaki (thick rolls) with even pressure and clean cuts.",
+                    "time_commitment_hours": 6.0,
+                    "target_date_hint": "Week 2-3",
+                    "roadmap": [
+                        f"Follow rolling tutorials from: {ref_3}",
+                        "Make 3 batches of hosomaki (cucumber, avocado, tuna)",
+                        "Progress to futomaki with 3-4 fillings",
+                        "Practice cutting rolls into 6 or 8 even pieces",
+                    ],
+                    "instruction_steps": [
+                        "Place nori shiny-side down on mat, spread rice leaving 1cm border",
+                        "Lay fillings in a line across the centre",
+                        "Roll with firm, even pressure — lift mat, don't roll it in",
+                        "Wet knife before each cut; wipe between slices",
+                    ],
+                },
+                {
+                    "title": "Nigiri shaping and presentation",
+                    "description": "Hand-shape nigiri with correct rice density, wasabi placement, and fish drape.",
+                    "time_commitment_hours": 5.0,
+                    "target_date_hint": "Week 3-4",
+                    "roadmap": [
+                        "Practice shaping rice oblongs by hand (20g each)",
+                        "Apply thin wasabi line and drape fish slice",
+                        "Refine two-finger press technique for consistent density",
+                        "Plate 6-piece sets for visual consistency check",
+                    ],
+                    "instruction_steps": [
+                        "Wet hands in vinegar water to prevent sticking",
+                        "Form rice gently — squeeze too hard and it becomes gummy",
+                        "Fish should overhang rice by ~5mm on each end",
+                        "Serve within 5 minutes of shaping for best texture",
+                    ],
+                },
+                {
+                    "title": "Full sushi dinner: end-to-end execution",
+                    "description": "Plan, prep, and serve a complete sushi meal combining maki, nigiri, and sides within a 90-minute window.",
+                    "time_commitment_hours": 10.0,
+                    "target_date_hint": "Week 4+",
+                    "roadmap": [
+                        "Create a menu: 2 maki types, 2 nigiri types, miso soup, edamame",
+                        "Prep mise en place and timeline (rice first, fish last)",
+                        "Execute rolling and shaping within time target",
+                        "Plate, photograph, and self-score presentation and taste",
+                    ],
+                    "instruction_steps": [
+                        "Start rice 60 min before serving",
+                        "Slice all fish while rice cools",
+                        "Roll maki first (they hold better), then shape nigiri last",
+                        "Score each piece 1-5 on shape, rice texture, and taste",
+                    ],
+                },
+            ],
+        }
+
+    # --- Cooking / general food ---
+    if any(k in t for k in ["cook", "bak", "kitchen", "food", "recipe", "meal"]):
+        return {
+            "shopping_list": [
+                "Chef's knife (8-inch) and cutting board",
+                "Stainless steel or cast-iron skillet",
+                "Saucepan and stockpot",
+                "Measuring cups and spoons",
+                "Instant-read thermometer",
+                "Wooden spoons and silicone spatula",
+                "Basic pantry: olive oil, salt, pepper, garlic, onions, butter",
+            ],
+            "prerequisites": [
+                "Basic kitchen safety awareness (burns, cuts, cross-contamination)",
+                "Ability to follow a written recipe",
+                "Access to a stove/oven and basic cookware",
+            ],
+            "subgoals": _generic_subgoals(topic, ref_1, ref_2, ref_3),
+        }
+
+    # --- Fitness ---
+    if any(k in t for k in ["fitness", "workout", "exercise", "gym", "strength",
+                             "run", "muscle", "weight loss", "cardio", "yoga"]):
+        return {
+            "shopping_list": [
+                "Comfortable athletic shoes appropriate for your activity",
+                "Resistance bands (light, medium, heavy)",
+                "Yoga mat or exercise mat",
+                "Water bottle (32 oz minimum)",
+                "Workout log notebook or tracking app",
+            ],
+            "prerequisites": [
+                "Medical clearance if you have pre-existing conditions",
+                "Baseline fitness assessment (max push-ups, mile time, flexibility)",
+                "Understanding of proper warm-up and cool-down routines",
+            ],
+            "subgoals": _generic_subgoals(topic, ref_1, ref_2, ref_3),
+        }
+
+    # --- Programming / tech ---
+    if any(k in t for k in ["programming", "coding", "software", "python",
+                             "javascript", "web dev", "app dev", "code"]):
+        return {
+            "shopping_list": [
+                "Computer with modern OS and reliable internet",
+                "Code editor (VS Code recommended — free)",
+                "GitHub account for version control",
+                "Optional: second monitor for documentation reference",
+            ],
+            "prerequisites": [
+                "Basic computer literacy and file management",
+                "Typing proficiency (40+ WPM recommended)",
+                "Familiarity with using a web browser and terminal/command line",
+            ],
+            "subgoals": _generic_subgoals(topic, ref_1, ref_2, ref_3),
+        }
+
+    # --- Finance / investing ---
+    if any(k in t for k in ["finance", "invest", "stock", "budget", "saving",
+                             "money", "trading", "crypto", "portfolio"]):
+        return {
+            "shopping_list": [
+                "Spreadsheet software or budgeting app (YNAB, Mint, or Google Sheets)",
+                "Brokerage account (Fidelity, Schwab, or Vanguard)",
+                "Notepad for tracking financial decisions and rationale",
+            ],
+            "prerequisites": [
+                "Basic understanding of income, expenses, and net worth",
+                "Emergency fund covering 1-3 months of expenses",
+                "Awareness of tax implications in your jurisdiction",
+            ],
+            "subgoals": _generic_subgoals(topic, ref_1, ref_2, ref_3),
+        }
+
+    # --- Music ---
+    if any(k in t for k in ["music", "guitar", "piano", "drum", "sing",
+                             "instrument", "song", "compose"]):
+        return {
+            "shopping_list": [
+                "Your instrument (or access to one for practice)",
+                "Tuner / metronome app",
+                "Music stand and printed sheet music or tabs",
+                "Audio recorder or phone for self-review",
+            ],
+            "prerequisites": [
+                "Basic understanding of musical notation or tablature",
+                "Ability to commit to daily 15-30 minute practice sessions",
+                "A quiet practice space",
+            ],
+            "subgoals": _generic_subgoals(topic, ref_1, ref_2, ref_3),
+        }
+
+    # --- Language learning ---
+    if any(k in t for k in ["language", "spanish", "french", "japanese",
+                             "german", "chinese", "korean", "italian",
+                             "learn english", "esl", "vocabulary"]):
+        return {
+            "shopping_list": [
+                "Language learning app (Anki, Duolingo, or Pimsleur)",
+                "Pocket phrasebook or dictionary",
+                "Notebook dedicated to vocabulary and grammar notes",
+                "Headphones for listening practice",
+            ],
+            "prerequisites": [
+                "Motivation and clear reason for learning (travel, career, heritage)",
+                "Daily 20-minute practice slot identified",
+                "Baseline self-assessment of current level",
+            ],
+            "subgoals": _generic_subgoals(topic, ref_1, ref_2, ref_3),
+        }
+
+    # --- Fallback / generic ---
+    return {
+        "shopping_list": [],
+        "prerequisites": [
+            f"Baseline familiarity with {topic}",
+            "Weekly calendar blocks reserved for focused practice",
+            "Tracking system for progress and blockers",
+            "Defined review cadence (daily check-ins + weekly retro)",
+        ],
+        "subgoals": _generic_subgoals(topic, ref_1, ref_2, ref_3),
+    }
+
+
+def _generic_subgoals(topic: str, ref_1: str, ref_2: str, ref_3: str) -> list[dict]:
+    """Return 5 solid topic-specific subgoals using the topic name in every field."""
+    return [
+        {
+            "title": f"Foundation: Research and define success criteria for {topic}",
+            "description": f"Gather foundational knowledge about {topic} and define clear, measurable criteria for what 'done' looks like.",
+            "time_commitment_hours": 5.0,
+            "target_date_hint": "Week 1",
+            "roadmap": [
+                f"Read and summarise key concepts from: {ref_1}",
+                f"Define 3 measurable outcomes that prove competence in {topic}",
+                f"Run one baseline attempt at {topic} and score yourself honestly",
+            ],
+            "instruction_steps": [
+                "Create a one-page reference sheet of core concepts",
+                "Write down your success criteria in concrete terms",
+                "Score your baseline attempt and list your 3 biggest gaps",
+            ],
+        },
+        {
+            "title": f"Core skill development for {topic}",
+            "description": f"Build the fundamental skills required for {topic} through focused, repetitive practice sessions.",
+            "time_commitment_hours": 7.0,
+            "target_date_hint": "Week 2",
+            "roadmap": [
+                f"Complete 3-4 focused practice sessions using: {ref_2}",
+                f"Track quality and error rate for each {topic} session",
+                f"Hit a minimum consistency threshold before moving on",
+            ],
+            "instruction_steps": [
+                "Time-box each practice session to 30-60 minutes",
+                "Record one key takeaway and one mistake per session",
+                "Repeat the weakest exercise at the end of each session",
+            ],
+        },
+        {
+            "title": f"Intermediate integration for {topic}",
+            "description": f"Combine foundational skills into complete {topic} workflows with increasing complexity.",
+            "time_commitment_hours": 8.0,
+            "target_date_hint": "Week 3",
+            "roadmap": [
+                f"Integrate multiple skills using patterns from: {ref_3}",
+                f"Add one new complexity variable to each {topic} session",
+                "Review and fix recurring failure points",
+            ],
+            "instruction_steps": [
+                "Start each session with a quick fundamentals warm-up",
+                "Run through the complete workflow twice with quality scoring",
+                "Identify and patch the top recurring bottleneck",
+            ],
+        },
+        {
+            "title": f"Real-world application of {topic}",
+            "description": f"Apply {topic} under realistic constraints — time pressure, full complexity, real stakes.",
+            "time_commitment_hours": 6.0,
+            "target_date_hint": "Week 4",
+            "roadmap": [
+                f"Simulate a real-world {topic} scenario with strict time limits",
+                "Execute the full workflow and score against your success criteria",
+                "Compare results to your baseline and measure improvement",
+            ],
+            "instruction_steps": [
+                "Set hard start/end times for each practice run",
+                "Use a rubric to score yourself after each attempt",
+                "Change only one variable between attempts",
+            ],
+        },
+        {
+            "title": f"Mastery validation and maintenance plan for {topic}",
+            "description": f"Confirm you've met your success criteria for {topic} and set up a recurring practice schedule to maintain the skill.",
+            "time_commitment_hours": 4.0,
+            "target_date_hint": "Week 5-6",
+            "roadmap": [
+                "Run a final benchmark against your original success criteria",
+                "Document your process as a repeatable checklist/SOP",
+                "Schedule weekly maintenance sessions and a monthly review",
+            ],
+            "instruction_steps": [
+                "Score your final benchmark and compare to your Week 1 baseline",
+                "Finalise your SOP — keep it short and actionable",
+                "Add recurring calendar events for maintenance practice",
+            ],
+        },
+    ]
+
+
 def _heuristic_research_goals(
     topic: str,
     search_results: list[dict[str, str]],
@@ -771,7 +1168,7 @@ def _heuristic_research_goals(
     schedule_context: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build practical fallback goals when an AI provider is not configured."""
-    clean_topic = str(topic or "").strip() or "Research Topic"
+    clean_topic = _extract_topic(topic)
     area = str(life_area_name or "General").strip() or "General"
 
     source_insights = [
@@ -793,21 +1190,23 @@ def _heuristic_research_goals(
     if merged_insight:
         description += f" Research context: {merged_insight}"
 
+    domain = _domain_heuristics(clean_topic, source_titles)
+
     roadmap = [
-        "Week 1: Define baseline skill level, constraints, and exact completion criteria",
-        "Week 1: Build environment, tools, and tracking dashboard",
-        "Week 2: Learn core theory and vocabulary with deliberate notes",
-        "Week 2: Practice foundational drills with quality thresholds",
-        "Week 3: Increase repetition volume while preserving quality",
+        f"Week 1: Define baseline skill level and completion criteria for {clean_topic}",
+        f"Week 1: Set up environment, tools, and tracking for {clean_topic}",
+        f"Week 2: Learn core theory and terminology of {clean_topic}",
+        f"Week 2: Practice foundational {clean_topic} techniques with quality thresholds",
+        f"Week 3: Increase practice volume for {clean_topic} while preserving quality",
         "Week 3: Add diagnostic review after each practice block",
-        "Week 4: Simulate real-world execution with time limits",
+        f"Week 4: Simulate real-world {clean_topic} execution with time limits",
         "Week 4: Identify recurring failures and root causes",
-        "Week 5: Isolate weak components into targeted mini-drills",
+        f"Week 5: Isolate weak {clean_topic} components into targeted drills",
         "Week 5: Reintegrate improved components into full workflow",
         "Week 6: Add complexity and edge-case handling",
-        "Week 6: Benchmark performance versus completion criteria",
-        "Week 7: Optimize speed/quality tradeoffs with controlled experiments",
-        "Week 7: Document standardized repeatable process",
+        f"Week 6: Benchmark {clean_topic} performance versus completion criteria",
+        "Week 7: Optimize speed/quality trade-offs with controlled experiments",
+        f"Week 7: Document standardised repeatable {clean_topic} process",
         "Week 8: Final validation run with objective scoring",
         "Week 8: Publish final playbook and maintenance cadence",
     ]
@@ -825,22 +1224,14 @@ def _heuristic_research_goals(
         "Refactor process documentation as skills improve",
     ]
 
-    prerequisites = [
+    prerequisites = domain.get("prerequisites", [
         f"Baseline familiarity with {clean_topic}",
         "Weekly calendar blocks reserved for focused execution",
         "Tracking system for metrics, blockers, and outcomes",
         "A defined review cadence (daily check-ins + weekly retro)",
-    ]
+    ])
 
-    shopping_list: list[str] = []
-    topic_l = clean_topic.lower()
-    if any(k in topic_l for k in ["sushi", "cook", "kitchen", "food"]):
-        shopping_list = [
-            "Core tools/equipment needed for repeatable practice",
-            "Primary materials/ingredients for multi-session training",
-            "Preparation and storage supplies",
-            "Cleanup and maintenance supplies",
-        ]
+    shopping_list = domain.get("shopping_list", [])
 
     context_notes = [
         f"Optimize for {area} constraints and available time",
@@ -852,93 +1243,7 @@ def _heuristic_research_goals(
     daily_plan = _build_daily_plan_lines(instruction_steps, schedule_context, seed=0)
     schedule_fit_notes = _build_schedule_fit_notes(schedule_context, daily_plan)
 
-    ref_1 = source_titles[0] if len(source_titles) > 0 else f"core {clean_topic} reference"
-    ref_2 = source_titles[1] if len(source_titles) > 1 else f"intermediate {clean_topic} reference"
-    ref_3 = source_titles[2] if len(source_titles) > 2 else f"advanced {clean_topic} reference"
-
-    subgoals = [
-        {
-            "title": f"Foundation: Define standards for {clean_topic}",
-            "description": f"Build baseline knowledge and define objective quality criteria for {clean_topic} before advanced execution.",
-            "time_commitment_hours": 5.0,
-            "target_date_hint": "Week 1",
-            "roadmap": [
-                f"Review and summarize 2-3 references, starting with: {ref_1}",
-                f"Define measurable quality criteria for {clean_topic} outcomes",
-                f"Run one baseline diagnostic session for {clean_topic} and score results",
-            ],
-            "instruction_steps": [
-                "Create a one-page glossary/checklist",
-                "Score baseline performance using your quality criteria",
-                "List top 3 weaknesses to target in next subgoal",
-            ],
-        },
-        {
-            "title": f"Skill Block 1: Core drills for {clean_topic}",
-            "description": f"Develop repeatable control on the core techniques required for {clean_topic} through short, high-frequency drills.",
-            "time_commitment_hours": 7.0,
-            "target_date_hint": "Week 2",
-            "roadmap": [
-                f"Run 3-4 focused drill sessions aligned to: {ref_2}",
-                "Track error frequency and quality variance each session",
-                "Hit minimum consistency threshold before progression",
-            ],
-            "instruction_steps": [
-                "Use timer-based practice blocks",
-                "Record one video/photo sample per session for review",
-                "Repeat weak drill at the end of each session",
-            ],
-        },
-        {
-            "title": f"Skill Block 2: Intermediate integration for {clean_topic}",
-            "description": f"Combine fundamentals into end-to-end {clean_topic} workflows under moderate complexity.",
-            "time_commitment_hours": 8.0,
-            "target_date_hint": "Week 3",
-            "roadmap": [
-                f"Integrate multiple core skills using patterns from: {ref_3}",
-                "Introduce one new complexity variable per session",
-                "Review and reduce failure points with targeted fixes",
-            ],
-            "instruction_steps": [
-                "Start each session with a quick fundamentals warmup",
-                "Run complete workflow twice with quality scoring",
-                "Log and patch top recurring bottleneck",
-            ],
-        },
-        {
-            "title": f"Application: Real-world execution for {clean_topic}",
-            "description": f"Perform {clean_topic} under realistic constraints such as time limits and full workflow sequencing.",
-            "time_commitment_hours": 6.0,
-            "target_date_hint": "Week 4",
-            "roadmap": [
-                "Simulate production/real-world context with strict timing",
-                "Execute full workflow with quality + speed targets",
-                "Compare outcomes against predefined completion criteria",
-            ],
-            "instruction_steps": [
-                "Set hard start/end times for each run",
-                "Use post-run rubric scoring and notes",
-                "Iterate one parameter only between runs",
-            ],
-        },
-        {
-            "title": f"Final Validation and Maintenance for {clean_topic}",
-            "description": f"Validate mastery of {clean_topic} and lock in a sustainable maintenance cadence.",
-            "time_commitment_hours": 4.0,
-            "target_date_hint": "Week 5-6",
-            "roadmap": [
-                "Run a final benchmark session against target criteria",
-                "Document repeatable SOP/checklist",
-                "Define weekly maintenance and monthly progression review",
-            ],
-            "instruction_steps": [
-                "Score final benchmark and compare to baseline",
-                "Finalize SOP and keep it versioned",
-                "Schedule recurring review sessions in calendar",
-            ],
-        },
-    ]
-
+    subgoals = domain.get("subgoals", [])
     for i, sg in enumerate(subgoals):
         sg_steps = _to_string_list(sg.get("instruction_steps"), max_items=10)
         sg["daily_plan"] = _build_daily_plan_lines(sg_steps, schedule_context, seed=i)
@@ -1169,12 +1474,17 @@ def research_and_create_goals(
         roadmap[], instruction_steps[], prerequisites[], shopping_list[], context_notes[],
         daily_plan[], schedule_fit_notes[]}.
     """
-    clean_topic = str(topic or "").strip()
-    if not clean_topic:
+    clean_topic = _extract_topic(topic)
+    raw_query = str(topic or "").strip()
+    if not clean_topic or clean_topic == "Research Topic":
         return {"mode": "heuristic", "search_results": [], "analysis": "Please provide a research topic.", "goals": []}
 
+    # Use the raw query for web search (more context = better results),
+    # but use clean_topic for display and goal titles.
+    search_query = raw_query if raw_query else clean_topic
+
     # Step 1: Web search
-    search_results = web_search(clean_topic, num_results=6)
+    search_results = web_search(search_query, num_results=6)
 
     # Build research context from search results
     if search_results:
