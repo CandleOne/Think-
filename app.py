@@ -34,7 +34,7 @@ load_local_env()
 
 import re
 
-from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info, query_ai, query_ai_empowered, analyze_goals, build_today_plan
+from ai_brain import optimize_schedule, build_routine_plan, apply_schedule_updates, get_ai_runtime_info, query_ai, query_ai_empowered, analyze_goals, build_today_plan, research_and_create_goals, web_search
 
 
 def parse_lto_sessions(name, notes):
@@ -1222,11 +1222,108 @@ def get_schedule():
 @app.route('/api/ai/status')
 def ai_status():
     runtime = get_ai_runtime_info()
+    has_search = bool(os.environ.get('GOOGLE_API_KEY') and os.environ.get('GOOGLE_CSE_ID'))
     return jsonify({
         'ok': True,
         'provider': runtime['provider'],
         'model': runtime['model'],
-        'configured': runtime['configured']
+        'configured': runtime['configured'],
+        'web_search': has_search,
+    })
+
+
+@app.route('/api/ai/research', methods=['POST'])
+def ai_research():
+    """Search the web, analyze results with AI, and optionally create goals."""
+    data, error = get_json_payload(required_fields=['topic'])
+    if error:
+        return error
+
+    topic = str(data.get('topic') or '').strip()
+    if not topic:
+        return api_error('topic is required', 400)
+
+    life_area_id = data.get('life_area_id')
+    create_goals = 1 if int(data.get('create_goals', 0) or 0) else 0
+    token_limit = 2000
+    try:
+        token_limit = int(data.get('token_limit', 2000) or 2000)
+    except (TypeError, ValueError):
+        pass
+
+    # Resolve life area name for context
+    life_area_name = None
+    if life_area_id:
+        db = get_db()
+        area = db.execute('SELECT name FROM life_areas WHERE id=?', (life_area_id,)).fetchone()
+        if area:
+            life_area_name = area['name']
+        db.close()
+
+    result = research_and_create_goals(topic, life_area_name=life_area_name, token_limit=token_limit)
+
+    created_goals = []
+    if create_goals and result.get('goals'):
+        from datetime import date as _date, timedelta
+        today = _date.today()
+
+        db = get_db()
+        try:
+            # Resolve life_area_id: use provided, or first area
+            area_id = None
+            if life_area_id:
+                try:
+                    area_id = int(life_area_id)
+                except (TypeError, ValueError):
+                    pass
+            if not area_id:
+                row = db.execute('SELECT id FROM life_areas ORDER BY sort_order LIMIT 1').fetchone()
+                area_id = row['id'] if row else 1
+
+            for g in result['goals']:
+                # Parse target_date_hint into actual date
+                hint = (g.get('target_date_hint') or '').lower()
+                target_date = None
+                if 'week' in hint:
+                    try:
+                        weeks = int(re.search(r'(\d+)', hint).group(1))
+                        target_date = (today + timedelta(weeks=weeks)).isoformat()
+                    except Exception:
+                        target_date = (today + timedelta(weeks=4)).isoformat()
+                elif 'month' in hint:
+                    try:
+                        months = int(re.search(r'(\d+)', hint).group(1))
+                        target_date = (today + timedelta(days=months * 30)).isoformat()
+                    except Exception:
+                        target_date = (today + timedelta(days=90)).isoformat()
+                elif 'year' in hint:
+                    target_date = (today + timedelta(days=365)).isoformat()
+
+                cur = db.execute(
+                    '''INSERT INTO goals (life_area_id, title, description, target_date, priority,
+                       difficulty, time_commitment_hours, ai_priority_score, ai_reasoning)
+                       VALUES (?,?,?,?,?,?,?,?,?)''',
+                    (area_id, g['title'], g.get('description', ''),
+                     target_date, g.get('priority', 3),
+                     g.get('difficulty', 5), g.get('time_commitment_hours', 0),
+                     g.get('priority', 3), f"Auto-created from research: {topic}")
+                )
+                created_goals.append({
+                    'id': cur.lastrowid,
+                    'title': g['title'],
+                    'target_date': target_date,
+                })
+            db.commit()
+        finally:
+            db.close()
+
+    return jsonify({
+        'ok': True,
+        'mode': result.get('mode', 'heuristic'),
+        'search_results': result.get('search_results', []),
+        'analysis': result.get('analysis', ''),
+        'suggested_goals': result.get('goals', []),
+        'created_goals': created_goals,
     })
 
 

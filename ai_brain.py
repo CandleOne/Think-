@@ -661,6 +661,142 @@ def query_ai_empowered(prompt: str, context: dict[str, Any] | None = None, token
     }
 
 
+# ── Web Search ────────────────────────────────────────────────────────────────
+
+def web_search(query: str, num_results: int = 5) -> list[dict[str, str]]:
+    """Search the web via Google Custom Search JSON API.
+
+    Requires GOOGLE_API_KEY and GOOGLE_CSE_ID environment variables.
+    Returns list of {title, link, snippet}.
+    """
+    api_key = os.environ.get("GOOGLE_API_KEY", "").strip()
+    cse_id = os.environ.get("GOOGLE_CSE_ID", "").strip()
+    if not api_key or not cse_id:
+        return []
+
+    from urllib.parse import urlencode
+
+    params = urlencode({
+        "key": api_key,
+        "cx": cse_id,
+        "q": query,
+        "num": min(num_results, 10),
+    })
+    url = f"https://www.googleapis.com/customsearch/v1?{params}"
+    req = urllib_request.Request(url, method="GET", headers={"Accept": "application/json"})
+    try:
+        with urllib_request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = []
+            for item in data.get("items", [])[:num_results]:
+                results.append({
+                    "title": str(item.get("title", "")),
+                    "link": str(item.get("link", "")),
+                    "snippet": str(item.get("snippet", "")),
+                })
+            return results
+    except Exception:
+        return []
+
+
+def research_and_create_goals(
+    topic: str,
+    life_area_name: str | None = None,
+    token_limit: int = 2000,
+) -> dict[str, Any]:
+    """Search the web for a topic, feed results to AI, and return goal suggestions.
+
+    Returns {mode, search_results, analysis, goals[]}.
+    Each goal: {title, description, priority, difficulty, time_commitment_hours, target_date_hint}.
+    """
+    clean_topic = str(topic or "").strip()
+    if not clean_topic:
+        return {"mode": "heuristic", "search_results": [], "analysis": "Please provide a research topic.", "goals": []}
+
+    # Step 1: Web search
+    search_results = web_search(clean_topic, num_results=6)
+
+    # Build research context from search results
+    if search_results:
+        research_text = "\n\n".join(
+            f"[{i+1}] {r['title']}\n{r['snippet']}\nURL: {r['link']}"
+            for i, r in enumerate(search_results)
+        )
+    else:
+        research_text = "(No web search results available — Google API may not be configured. Rely on your own knowledge.)"
+
+    # Step 2: AI analysis + goal generation
+    system_prompt = (
+        "You are a life optimization research assistant. "
+        "The user wants to research a topic and create actionable goals from the findings. "
+        "Analyze the provided web search results, synthesize key insights, and propose concrete goals. "
+        "Return valid JSON with keys:\n"
+        '  "analysis": string — 2-4 paragraph summary of what you found and key takeaways\n'
+        '  "goals": array of objects, each with:\n'
+        '    "title": string — concise goal name\n'
+        '    "description": string — actionable description with specific steps or milestones\n'
+        '    "priority": integer 1-5 (5=highest)\n'
+        '    "difficulty": integer 1-10\n'
+        '    "time_commitment_hours": number — estimated total hours\n'
+        '    "target_date_hint": string — relative timeline like "2 weeks", "1 month", "3 months"\n'
+        "Propose 3-6 goals that are specific, measurable, and build on each other."
+    )
+
+    area_note = f"\nTarget life area: {life_area_name}" if life_area_name else ""
+
+    user_prompt = json.dumps({
+        "research_topic": clean_topic,
+        "search_results": research_text,
+        "life_area": life_area_name or "General",
+        "instructions": f"Research this topic and create actionable goals.{area_note}",
+    }, ensure_ascii=True)
+
+    effective_limit = _sanitize_token_limit(token_limit, default=2000)
+    provider, llm_result = _call_ai_json(system_prompt, user_prompt, max_tokens=effective_limit)
+
+    if llm_result and isinstance(llm_result, dict):
+        analysis = str(llm_result.get("analysis") or "").strip()
+        raw_goals = llm_result.get("goals") if isinstance(llm_result.get("goals"), list) else []
+        goals = []
+        for g in raw_goals:
+            if not isinstance(g, dict):
+                continue
+            title = str(g.get("title") or "").strip()
+            if not title:
+                continue
+            goals.append({
+                "title": title,
+                "description": str(g.get("description") or "").strip(),
+                "priority": min(5, max(1, int(g.get("priority") or 3))),
+                "difficulty": min(10, max(1, int(g.get("difficulty") or 5))),
+                "time_commitment_hours": max(0, float(g.get("time_commitment_hours") or 0)),
+                "target_date_hint": str(g.get("target_date_hint") or "").strip(),
+            })
+        if analysis or goals:
+            return {
+                "mode": provider,
+                "search_results": search_results,
+                "analysis": analysis or "Research complete.",
+                "goals": goals,
+            }
+
+    # Heuristic fallback
+    if search_results:
+        analysis = f"Found {len(search_results)} results for \"{clean_topic}\":\n\n"
+        for i, r in enumerate(search_results):
+            analysis += f"{i+1}. **{r['title']}** — {r['snippet']}\n"
+        analysis += "\n(AI provider not configured — showing raw results. Configure an API key for goal generation.)"
+    else:
+        analysis = "No search results and no AI provider configured. Set GOOGLE_API_KEY + GOOGLE_CSE_ID for web search, and an AI provider key for analysis."
+
+    return {
+        "mode": "heuristic",
+        "search_results": search_results,
+        "analysis": analysis,
+        "goals": [],
+    }
+
+
 # ── Goal Analysis ──────────────────────────────────────────────────────────────
 
 def _heuristic_analyze_goals(goals: list[dict[str, Any]]) -> dict[str, Any]:

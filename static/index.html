@@ -423,6 +423,23 @@ a:hover { text-decoration: underline; }
 .ai-msg-user .ai-msg-bubble { border-color: rgba(88,166,255,0.45); background: rgba(88,166,255,0.08); }
 .ai-query-actions { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .ai-status-pill { font-size: 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 4px 8px; background: var(--surface2); }
+
+/* Research panel */
+.research-panel { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 16px; margin-bottom: 16px; }
+.research-panel h3 { margin: 0 0 12px 0; font-size: 16px; }
+.research-results { margin-top: 12px; }
+.research-result-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: var(--surface2); }
+.research-result-card a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.research-result-card a:hover { text-decoration: underline; }
+.research-result-card .rr-snippet { font-size: 13px; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+.research-analysis { margin-top: 14px; padding: 12px; background: rgba(88,166,255,0.06); border: 1px solid rgba(88,166,255,0.18); border-radius: 8px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+.research-goal-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 8px; background: var(--surface2); display: flex; gap: 12px; align-items: flex-start; }
+.research-goal-card .rg-body { flex: 1; }
+.research-goal-card .rg-title { font-weight: 600; font-size: 14px; }
+.research-goal-card .rg-desc { font-size: 13px; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+.research-goal-card .rg-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.research-goal-card .rg-tag { font-size: 11px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-muted); background: var(--surface); }
+.research-loading { text-align: center; padding: 24px; color: var(--text-muted); font-size: 14px; }
 </style>
 </head>
 <body>
@@ -814,6 +831,8 @@ function renderAiMessages() {
 
 async function renderAiInterface(c) {
   const status = await ensureAiStatus();
+  const areas = await getList('life-areas', 'Failed to load life areas');
+  const searchConfigured = status.web_search;
   c.innerHTML = `
     <div class="page-header">
       <div>
@@ -821,9 +840,32 @@ async function renderAiInterface(c) {
         <span style="color:var(--text-muted);font-size:13px">Query the AI brain for planning, routines, and schedule strategy.</span>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        <span class="ai-status-pill">Provider: ${esc(status.provider)} · Model: ${esc(status.model)} · ${status.configured ? 'configured' : 'fallback mode'}</span>
+        <span class="ai-status-pill">Provider: ${esc(status.provider)} · Model: ${esc(status.model)} · ${status.configured ? 'configured' : 'fallback mode'}${searchConfigured ? ' · 🔍 Web search' : ''}</span>
         <button class="btn" onclick="resetAiChat()">Clear Chat</button>
       </div>
+    </div>
+    <div class="research-panel">
+      <h3>🔍 Research & Create Goals</h3>
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 10px 0">Search the web, analyze findings with AI, and auto-create goals from the results.${!searchConfigured ? ' <span style="color:var(--orange)">Set GOOGLE_API_KEY + GOOGLE_CSE_ID in .env for web search.</span>' : ''}</p>
+      <form id="research-form" onsubmit="event.preventDefault();sendResearch();">
+        <div class="form-row" style="gap:8px">
+          <div class="form-group" style="flex:3">
+            <input type="text" id="research-topic" placeholder="e.g. Best strategies for learning financial derivatives in 3 months" required>
+          </div>
+          <div class="form-group" style="flex:1">
+            <select id="research-area">
+              <option value="">Life Area (optional)</option>
+              ${areas.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:13px;color:var(--text-muted)"><input type="checkbox" id="research-auto-create" checked> Auto-create goals from research</label>
+          <div style="flex:1"></div>
+          <button type="submit" class="btn btn-primary">🔍 Research</button>
+        </div>
+      </form>
+      <div id="research-results"></div>
     </div>
     <div class="ai-chat-wrap">
       <div class="ai-chat-feed" id="ai-chat-feed"></div>
@@ -861,6 +903,117 @@ function seedAiPrompt(text) {
   if (!input) return;
   input.value = text;
   input.focus();
+}
+
+async function sendResearch() {
+  const topicEl = document.getElementById('research-topic');
+  const areaEl = document.getElementById('research-area');
+  const autoCreateEl = document.getElementById('research-auto-create');
+  const resultsDiv = document.getElementById('research-results');
+  if (!topicEl || !resultsDiv) return;
+
+  const topic = topicEl.value.trim();
+  if (!topic) { toast('Enter a research topic'); return; }
+
+  resultsDiv.innerHTML = '<div class="research-loading"><span class="spin">⟳</span> Researching the web and analyzing results…</div>';
+
+  const res = await api('ai/research', {
+    method: 'POST',
+    body: {
+      topic,
+      life_area_id: areaEl && areaEl.value ? Number(areaEl.value) : null,
+      create_goals: autoCreateEl && autoCreateEl.checked ? 1 : 0,
+      token_limit: 2000,
+    },
+  });
+
+  if (showApiError(res)) {
+    resultsDiv.innerHTML = '<div class="research-loading" style="color:var(--red)">Research failed. Check API keys and try again.</div>';
+    return;
+  }
+
+  const searchResults = res.search_results || [];
+  const analysis = res.analysis || '';
+  const suggestedGoals = res.suggested_goals || [];
+  const createdGoals = res.created_goals || [];
+
+  let html = '';
+
+  // Search results
+  if (searchResults.length) {
+    html += `<div class="research-results">
+      <h4 style="margin:0 0 8px 0;font-size:14px;color:var(--text-muted)">🌐 Web Results (${searchResults.length})</h4>
+      ${searchResults.map(r => `
+        <div class="research-result-card">
+          <a href="${esc(r.link)}" target="_blank">${esc(r.title)}</a>
+          <div class="rr-snippet">${esc(r.snippet)}</div>
+        </div>
+      `).join('')}
+    </div>`;
+  }
+
+  // AI Analysis
+  if (analysis) {
+    html += `<div class="research-analysis"><strong>AI Analysis (${esc(res.mode)}):</strong>\n\n${esc(analysis)}</div>`;
+  }
+
+  // Suggested/created goals
+  if (suggestedGoals.length) {
+    html += `<div style="margin-top:14px">
+      <h4 style="margin:0 0 8px 0;font-size:14px">${createdGoals.length ? '✅' : '💡'} ${createdGoals.length ? `${createdGoals.length} Goals Created` : `${suggestedGoals.length} Goals Suggested`}</h4>
+      ${suggestedGoals.map((g, i) => {
+        const created = createdGoals.find(c => c.title === g.title);
+        return `<div class="research-goal-card">
+          <div class="rg-body">
+            <div class="rg-title">${created ? '✅' : '💡'} ${esc(g.title)}</div>
+            <div class="rg-desc">${esc(g.description)}</div>
+            <div class="rg-tags">
+              <span class="rg-tag">Priority: ${g.priority}/5</span>
+              <span class="rg-tag">Difficulty: ${g.difficulty}/10</span>
+              ${g.time_commitment_hours ? `<span class="rg-tag">${g.time_commitment_hours}h estimated</span>` : ''}
+              ${g.target_date_hint ? `<span class="rg-tag">📅 ${esc(g.target_date_hint)}</span>` : ''}
+              ${created ? `<span class="rg-tag" style="color:var(--green);border-color:var(--green)">Created (ID: ${created.id})</span>` : ''}
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+    if (!createdGoals.length && suggestedGoals.length) {
+      html += `<div style="margin-top:8px;text-align:right">
+        <button class="btn btn-primary" onclick="createResearchGoals()">Create These Goals</button>
+      </div>`;
+    }
+  }
+
+  resultsDiv.innerHTML = html || '<div class="research-loading">No results returned.</div>';
+
+  // Store last research for "Create These Goals" button
+  window._lastResearchTopic = topic;
+  window._lastResearchArea = areaEl && areaEl.value ? Number(areaEl.value) : null;
+}
+
+async function createResearchGoals() {
+  if (!window._lastResearchTopic) { toast('Run research first'); return; }
+  const resultsDiv = document.getElementById('research-results');
+  if (resultsDiv) {
+    const btn = resultsDiv.querySelector('.btn-primary');
+    if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  }
+
+  const res = await api('ai/research', {
+    method: 'POST',
+    body: {
+      topic: window._lastResearchTopic,
+      life_area_id: window._lastResearchArea,
+      create_goals: 1,
+      token_limit: 2000,
+    },
+  });
+  if (showApiError(res)) return;
+  const created = res.created_goals || [];
+  toast(`Created ${created.length} goal${created.length !== 1 ? 's' : ''} from research`);
+  renderAiInterface(document.getElementById('content'));
 }
 
 function resetAiChat() {
