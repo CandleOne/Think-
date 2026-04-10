@@ -707,6 +707,58 @@ def web_search(query: str, num_results: int = 5) -> list[dict[str, str]]:
         return []
 
 
+def _heuristic_research_goals(
+    topic: str,
+    search_results: list[dict[str, str]],
+    life_area_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """Build practical fallback goals when an AI provider is not configured."""
+    clean_topic = str(topic or "").strip() or "Research Topic"
+    area = str(life_area_name or "General").strip() or "General"
+
+    timeline = ["1 week", "2 weeks", "1 month", "6 weeks", "2 months", "3 months"]
+    hour_est = [4, 6, 8, 10, 12, 14]
+
+    goals: list[dict[str, Any]] = []
+    for i in range(min(6, max(3, len(search_results) or 4))):
+        src = search_results[i] if i < len(search_results) else None
+        src_title = str((src or {}).get("title") or "").strip()
+        src_snippet = str((src or {}).get("snippet") or "").strip()
+
+        if src_title:
+            title = src_title[:90]
+        else:
+            phase = ["Foundation", "Core Practice", "Skill Building", "Applied Execution", "Iteration", "Mastery"][i]
+            title = f"{clean_topic}: {phase}"
+
+        milestone = [
+            "Define scope, outcomes, and constraints",
+            "Set repeatable execution cadence",
+            "Build skill depth with focused drills",
+            "Apply skills in realistic scenarios",
+            "Review gaps and optimize approach",
+            "Consolidate into a durable routine",
+        ][i]
+
+        description = (
+            f"{milestone}. "
+            f"Use this phase to move {clean_topic} forward in {area}."
+        )
+        if src_snippet:
+            description += f" Reference insight: {src_snippet[:220]}"
+
+        goals.append({
+            "title": title,
+            "description": description,
+            "priority": max(1, 5 - (i // 2)),
+            "difficulty": min(10, 4 + i),
+            "time_commitment_hours": float(hour_est[i]),
+            "target_date_hint": timeline[i],
+        })
+
+    return goals
+
+
 def research_and_create_goals(
     topic: str,
     life_area_name: str | None = None,
@@ -789,19 +841,23 @@ def research_and_create_goals(
             }
 
     # Heuristic fallback
+    fallback_goals = _heuristic_research_goals(clean_topic, search_results, life_area_name=life_area_name)
     if search_results:
         analysis = f"Found {len(search_results)} results for \"{clean_topic}\":\n\n"
         for i, r in enumerate(search_results):
             analysis += f"{i+1}. **{r['title']}** — {r['snippet']}\n"
-        analysis += "\n(AI provider not configured — showing raw results. Configure an AI API key for goal generation.)"
+        analysis += "\n(AI provider not configured. Generated heuristic goals from the research results.)"
     else:
-        analysis = "No search results and no AI provider configured. Set TAVILY_API_KEY for web search, and an AI provider key for analysis."
+        analysis = (
+            "No search results were returned, so goals were generated from the topic heuristically. "
+            "Set TAVILY_API_KEY for live web search and an AI provider key for deeper analysis."
+        )
 
     return {
         "mode": "heuristic",
         "search_results": search_results,
         "analysis": analysis,
-        "goals": [],
+        "goals": fallback_goals,
     }
 
 

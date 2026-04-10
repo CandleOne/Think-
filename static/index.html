@@ -865,7 +865,7 @@ async function renderAiInterface(c) {
     </div>
     <div class="research-panel">
       <h3>🔍 Research & Create Goals</h3>
-      <p style="font-size:13px;color:var(--text-muted);margin:0 0 10px 0">Search the web, analyze findings with AI, and auto-create goals from the results.${!searchConfigured ? ' <span style="color:var(--orange)">Set GOOGLE_API_KEY + GOOGLE_CSE_ID in .env for web search.</span>' : ''}</p>
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 10px 0">Search the web, analyze findings with AI, and auto-create goals from the results.${!searchConfigured ? ' <span style="color:var(--orange)">Set TAVILY_API_KEY in .env for web search.</span>' : ''}</p>
       <form id="research-form" onsubmit="event.preventDefault();sendResearch();">
         <div class="form-row" style="gap:8px">
           <div class="form-group" style="flex:3">
