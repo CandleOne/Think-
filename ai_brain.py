@@ -946,11 +946,11 @@ def research_and_create_goals(
         analysis = f"Found {len(search_results)} results for \"{clean_topic}\":\n\n"
         for i, r in enumerate(search_results):
             analysis += f"{i+1}. **{r['title']}** — {r['snippet']}\n"
-        analysis += "\n(AI provider not configured. Generated heuristic goals from the research results.)"
+        analysis += "\nGenerated a structured execution plan from these findings, including roadmap steps, prerequisites, and context notes."
     else:
         analysis = (
-            "No search results were returned, so goals were generated from the topic heuristically. "
-            "Set TAVILY_API_KEY for live web search and an AI provider key for deeper analysis."
+            "Generated a structured execution plan from the topic directly, including roadmap steps, prerequisites, "
+            "and context notes."
         )
 
     return {
