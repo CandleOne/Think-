@@ -998,18 +998,18 @@ async function sendResearch() {
       }).join('')}
     </div>`;
 
-    if (!createdGoals.length && suggestedGoals.length) {
-      html += `<div style="margin-top:8px;text-align:right">
-        <button class="btn btn-primary" onclick="createResearchGoals()">Create These Goals</button>
-      </div>`;
-    }
+    html += `<div style="margin-top:8px;text-align:right;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
+      <button class="btn" onclick="openCreateLtoModal()">Create LTO</button>
+      ${!createdGoals.length && suggestedGoals.length ? '<button class="btn btn-primary" onclick="createResearchGoals()">Create These Goals</button>' : ''}
+    </div>`;
   }
 
   resultsDiv.innerHTML = html || '<div class="research-loading">No results returned.</div>';
 
-  // Store last research for "Create These Goals" button
+  // Store last research for post-generation actions
   window._lastResearchTopic = topic;
   window._lastResearchArea = areaEl && areaEl.value ? Number(areaEl.value) : null;
+  window._lastResearchSuggestedGoals = Array.isArray(suggestedGoals) ? suggestedGoals : [];
 }
 
 async function createResearchGoals() {
@@ -1033,6 +1033,100 @@ async function createResearchGoals() {
   const created = res.created_goals || [];
   toast(`Created ${created.length} goal${created.length !== 1 ? 's' : ''} from research`);
   renderAiInterface(document.getElementById('content'));
+}
+
+function openCreateLtoModal() {
+  const ltoSections = sidebarSections.filter(s => Number(s.is_long_term_section || 0) === 1);
+  if (!ltoSections.length) {
+    toast('No long-term objective section found. Add one first from the sidebar.');
+    return;
+  }
+
+  if (ltoSections.length === 1) {
+    createResearchLTO(ltoSections[0].page_key);
+    return;
+  }
+
+  openModal(`
+    <h3>Create LTO</h3>
+    <form id="research-lto-form">
+      <div class="form-group">
+        <label>Target Long-Term Section</label>
+        <select name="section_key">
+          ${ltoSections.map(s => `<option value="${esc(s.page_key)}">${esc(s.group_name)} · ${esc(s.label)}</option>`).join('')}
+        </select>
+      </div>
+    </form>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmCreateResearchLTO()">Create LTO</button>
+    </div>`);
+}
+
+async function confirmCreateResearchLTO() {
+  const form = document.getElementById('research-lto-form');
+  if (!form) return;
+  const sectionKey = form.section_key ? String(form.section_key.value || '').trim() : '';
+  if (!sectionKey) {
+    toast('Select a target section');
+    return;
+  }
+  await createResearchLTO(sectionKey);
+}
+
+async function createResearchLTO(sectionKey) {
+  const goals = Array.isArray(window._lastResearchSuggestedGoals) ? window._lastResearchSuggestedGoals : [];
+  if (!goals.length) {
+    toast('Run research first to generate goals');
+    return;
+  }
+
+  const status = statuses.find(s => String(s.color || '').toLowerCase() === 'blue') || statuses[0];
+  if (!status || !status.id) {
+    toast('No statuses available to create LTO items');
+    return;
+  }
+
+  let created = 0;
+  let failed = 0;
+  for (const g of goals) {
+    const title = String(g.title || '').trim();
+    if (!title) {
+      failed += 1;
+      continue;
+    }
+    const detailBits = [];
+    if (g.description) detailBits.push(String(g.description).trim());
+    detailBits.push(`Source topic: ${window._lastResearchTopic || 'Research'}`);
+    if (g.target_date_hint) detailBits.push(`Target hint: ${g.target_date_hint}`);
+    if (g.time_commitment_hours) detailBits.push(`Estimated hours: ${g.time_commitment_hours}`);
+
+    const res = await api('custom/' + sectionKey, {
+      method: 'POST',
+      body: {
+        name: title,
+        status_id: Number(status.id),
+        notes: detailBits.join('\n\n'),
+        is_long_term_objective: 1,
+      },
+    });
+    if (apiHasError(res)) failed += 1;
+    else created += 1;
+  }
+
+  closeModal();
+  if (created && !failed) {
+    toast(`Created ${created} LTO${created !== 1 ? 's' : ''}`);
+  } else if (created && failed) {
+    toast(`Created ${created} LTO${created !== 1 ? 's' : ''}, ${failed} failed`);
+  } else {
+    toast('Failed to create LTO items');
+  }
+
+  if (created) {
+    await refreshCoreData();
+    await loadPage(currentPage);
+  }
 }
 
 function resetAiChat() {
