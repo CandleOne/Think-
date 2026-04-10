@@ -774,92 +774,94 @@ def _heuristic_research_goals(
     clean_topic = str(topic or "").strip() or "Research Topic"
     area = str(life_area_name or "General").strip() or "General"
 
-    timeline = ["1 week", "2 weeks", "1 month", "6 weeks", "2 months", "3 months"]
-    hour_est = [4, 6, 8, 10, 12, 14]
+    source_insights = [
+        str((r or {}).get("snippet") or "").strip()
+        for r in search_results[:6]
+        if str((r or {}).get("snippet") or "").strip()
+    ]
+    merged_insight = " ".join(source_insights)[:400]
 
-    goals: list[dict[str, Any]] = []
-    for i in range(min(6, max(3, len(search_results) or 4))):
-        src = search_results[i] if i < len(search_results) else None
-        src_title = str((src or {}).get("title") or "").strip()
-        src_snippet = str((src or {}).get("snippet") or "").strip()
+    description = (
+        f"Comprehensive long-term roadmap to achieve {clean_topic} in {area}. "
+        "This plan is structured for consistent execution with measurable progress."
+    )
+    if merged_insight:
+        description += f" Research context: {merged_insight}"
 
-        if src_title:
-            title = src_title[:90]
-        else:
-            phase = ["Foundation", "Core Practice", "Skill Building", "Applied Execution", "Iteration", "Mastery"][i]
-            title = f"{clean_topic}: {phase}"
+    roadmap = [
+        "Week 1: Define baseline skill level, constraints, and exact completion criteria",
+        "Week 1: Build environment, tools, and tracking dashboard",
+        "Week 2: Learn core theory and vocabulary with deliberate notes",
+        "Week 2: Practice foundational drills with quality thresholds",
+        "Week 3: Increase repetition volume while preserving quality",
+        "Week 3: Add diagnostic review after each practice block",
+        "Week 4: Simulate real-world execution with time limits",
+        "Week 4: Identify recurring failures and root causes",
+        "Week 5: Isolate weak components into targeted mini-drills",
+        "Week 5: Reintegrate improved components into full workflow",
+        "Week 6: Add complexity and edge-case handling",
+        "Week 6: Benchmark performance versus completion criteria",
+        "Week 7: Optimize speed/quality tradeoffs with controlled experiments",
+        "Week 7: Document standardized repeatable process",
+        "Week 8: Final validation run with objective scoring",
+        "Week 8: Publish final playbook and maintenance cadence",
+    ]
 
-        milestone = [
-            "Define scope, outcomes, and constraints",
-            "Set repeatable execution cadence",
-            "Build skill depth with focused drills",
-            "Apply skills in realistic scenarios",
-            "Review gaps and optimize approach",
-            "Consolidate into a durable routine",
-        ][i]
+    instruction_steps = [
+        "Define one measurable success metric for every session",
+        "Run a pre-session checklist to remove setup friction",
+        "Time-box focused work and keep a completion log",
+        "After each session, record one failure and one correction",
+        "Convert recurring errors into explicit drill exercises",
+        "Use weekly retrospectives to update next-week priorities",
+        "Escalate complexity only after baseline quality is stable",
+        "Keep one buffer day each week for spillover and recovery",
+        "Audit outcomes against goals every Sunday",
+        "Refactor process documentation as skills improve",
+    ]
 
-        description = (
-            f"{milestone}. "
-            f"Use this phase to move {clean_topic} forward in {area}."
-        )
-        if src_snippet:
-            description += f" Reference insight: {src_snippet[:220]}"
+    prerequisites = [
+        f"Baseline familiarity with {clean_topic}",
+        "Weekly calendar blocks reserved for focused execution",
+        "Tracking system for metrics, blockers, and outcomes",
+        "A defined review cadence (daily check-ins + weekly retro)",
+    ]
 
-        roadmap = [
-            f"Week 1: {milestone}",
-            "Week 2: Execute daily/weekly repetitions and capture metrics",
-            "Week 3: Review blockers and adjust methods",
-            "Week 4+: Consolidate into a repeatable system",
+    shopping_list: list[str] = []
+    topic_l = clean_topic.lower()
+    if any(k in topic_l for k in ["sushi", "cook", "kitchen", "food"]):
+        shopping_list = [
+            "Core tools/equipment needed for repeatable practice",
+            "Primary materials/ingredients for multi-session training",
+            "Preparation and storage supplies",
+            "Cleanup and maintenance supplies",
         ]
 
-        instruction_steps = [
-            "Define a concrete output for this phase before starting",
-            "Time-block focused sessions and log completion",
-            "Do one deliberate-practice rep after each session",
-            "Run a weekly review and update the next actions",
-        ]
+    context_notes = [
+        f"Optimize for {area} constraints and available time",
+        "Prefer consistency of execution over occasional intensity",
+        "Reduce scope before skipping planned sessions",
+        "Use objective scoring criteria to avoid vague progress",
+    ]
 
-        prerequisites = [
-            f"Baseline familiarity with {clean_topic}",
-            "A weekly schedule with at least 3 focused sessions",
-            "A tracking method (notes app, sheet, or journal)",
-        ]
+    daily_plan = _build_daily_plan_lines(instruction_steps, schedule_context, seed=0)
+    schedule_fit_notes = _build_schedule_fit_notes(schedule_context, daily_plan)
 
-        shopping_list: list[str] = []
-        topic_l = clean_topic.lower()
-        if any(k in topic_l for k in ["sushi", "cook", "kitchen", "food"]):
-            shopping_list = [
-                "Core tools/equipment needed for practice",
-                "Primary materials/ingredients for 2-3 sessions",
-                "Storage and cleanup supplies",
-            ]
-
-        context_notes = [
-            f"Optimize for {area} constraints and available time",
-            "Prefer measurable milestones over vague progress",
-            "If blocked for 2+ sessions, reduce scope and keep cadence",
-        ]
-
-        daily_plan = _build_daily_plan_lines(instruction_steps, schedule_context, seed=i)
-        schedule_fit_notes = _build_schedule_fit_notes(schedule_context, daily_plan)
-
-        goals.append({
-            "title": title,
-            "description": description,
-            "priority": max(1, 5 - (i // 2)),
-            "difficulty": min(10, 4 + i),
-            "time_commitment_hours": float(hour_est[i]),
-            "target_date_hint": timeline[i],
-            "roadmap": roadmap,
-            "instruction_steps": instruction_steps,
-            "prerequisites": prerequisites,
-            "shopping_list": shopping_list,
-            "context_notes": context_notes,
-            "daily_plan": daily_plan,
-            "schedule_fit_notes": schedule_fit_notes,
-        })
-
-    return goals
+    return [{
+        "title": f"Master Plan: {clean_topic}",
+        "description": description,
+        "priority": 5,
+        "difficulty": 8,
+        "time_commitment_hours": 36.0,
+        "target_date_hint": "2 months",
+        "roadmap": roadmap,
+        "instruction_steps": instruction_steps,
+        "prerequisites": prerequisites,
+        "shopping_list": shopping_list,
+        "context_notes": context_notes,
+        "daily_plan": daily_plan,
+        "schedule_fit_notes": schedule_fit_notes,
+    }]
 
 
 def _to_string_list(value: Any, max_items: int = 8) -> list[str]:
@@ -892,12 +894,12 @@ def _normalize_research_goal(
     hours = max(0, float(goal.get("time_commitment_hours") or 0))
     target = str(goal.get("target_date_hint") or "").strip()
 
-    roadmap = _to_string_list(goal.get("roadmap"), max_items=8)
-    instruction_steps = _to_string_list(goal.get("instruction_steps"), max_items=10)
+    roadmap = _to_string_list(goal.get("roadmap"), max_items=28)
+    instruction_steps = _to_string_list(goal.get("instruction_steps"), max_items=30)
     prerequisites = _to_string_list(goal.get("prerequisites"), max_items=8)
     shopping_list = _to_string_list(goal.get("shopping_list"), max_items=12)
     context_notes = _to_string_list(goal.get("context_notes"), max_items=8)
-    daily_plan = _to_string_list(goal.get("daily_plan"), max_items=14)
+    daily_plan = _to_string_list(goal.get("daily_plan"), max_items=28)
     schedule_fit_notes = _to_string_list(goal.get("schedule_fit_notes"), max_items=8)
 
     if not instruction_steps and roadmap:
@@ -935,6 +937,63 @@ def _normalize_research_goal(
         "daily_plan": daily_plan,
         "schedule_fit_notes": schedule_fit_notes,
     }
+
+
+def _consolidate_research_goals(goals: list[dict[str, Any]], topic: str) -> list[dict[str, Any]]:
+    """Collapse multiple generated goals into one comprehensive master roadmap."""
+    if not goals:
+        return goals
+    if len(goals) == 1:
+        return goals
+
+    def merge_unique(items: list[str], incoming: list[str], limit: int) -> list[str]:
+        seen = {x.lower(): 1 for x in items}
+        for val in incoming:
+            key = val.lower()
+            if key in seen:
+                continue
+            items.append(val)
+            seen[key] = 1
+            if len(items) >= limit:
+                break
+        return items
+
+    primary = dict(goals[0])
+    title = str(primary.get("title") or "").strip() or f"Master Plan: {topic}"
+    primary["title"] = f"Master Plan: {topic}" if not title.lower().startswith("master plan:") else title
+    primary["description"] = (
+        f"Comprehensive consolidated roadmap for {topic}. "
+        "This plan merges all generated sub-roadmaps into one detailed execution track."
+    )
+    primary["priority"] = max(int(g.get("priority") or 3) for g in goals)
+    primary["difficulty"] = min(10, max(int(g.get("difficulty") or 5) for g in goals))
+    primary["time_commitment_hours"] = round(sum(float(g.get("time_commitment_hours") or 0) for g in goals), 1)
+
+    roadmap: list[str] = []
+    instructions: list[str] = []
+    prerequisites: list[str] = []
+    shopping: list[str] = []
+    context: list[str] = []
+    daily: list[str] = []
+    fit: list[str] = []
+
+    for g in goals:
+        roadmap = merge_unique(roadmap, _to_string_list(g.get("roadmap"), 28), 28)
+        instructions = merge_unique(instructions, _to_string_list(g.get("instruction_steps"), 30), 30)
+        prerequisites = merge_unique(prerequisites, _to_string_list(g.get("prerequisites"), 14), 14)
+        shopping = merge_unique(shopping, _to_string_list(g.get("shopping_list"), 20), 20)
+        context = merge_unique(context, _to_string_list(g.get("context_notes"), 14), 14)
+        daily = merge_unique(daily, _to_string_list(g.get("daily_plan"), 28), 28)
+        fit = merge_unique(fit, _to_string_list(g.get("schedule_fit_notes"), 14), 14)
+
+    primary["roadmap"] = roadmap
+    primary["instruction_steps"] = instructions
+    primary["prerequisites"] = prerequisites
+    primary["shopping_list"] = shopping
+    primary["context_notes"] = context
+    primary["daily_plan"] = daily
+    primary["schedule_fit_notes"] = fit
+    return [primary]
 
 
 def research_and_create_goals(
@@ -988,7 +1047,7 @@ def research_and_create_goals(
         '    "context_notes": array of caveats/tips/constraints important for this topic\n'
         '    "daily_plan": array of 5-7 entries in day-by-day hour-by-hour format (example: "Monday 7:00 PM - 8:00 PM: knife drills")\n'
         '    "schedule_fit_notes": array describing how this goal fits around the existing daily schedule and what to adjust if conflicts occur\n'
-        "Propose 3-6 goals that are specific, measurable, and build on each other."
+        "Return exactly 1 goal object with a single comprehensive detailed roadmap, not multiple separate goal roadmaps."
     )
 
     area_note = f"\nTarget life area: {life_area_name}" if life_area_name else ""
@@ -1020,6 +1079,7 @@ def research_and_create_goals(
             )
             if normalized:
                 goals.append(normalized)
+        goals = _consolidate_research_goals(goals, clean_topic)
         if analysis or goals:
             return {
                 "mode": provider,
