@@ -1184,6 +1184,27 @@ async function createResearchLTO(sectionKey, options = {}) {
 
   let created = 0;
   let failed = 0;
+
+  // Preserve deterministic unlock sequencing by explicitly controlling sort_order.
+  const existing = await getList('custom/' + sectionKey, 'Failed to load custom items for sequencing');
+  let nextSortOrder = Array.isArray(existing) && existing.length
+    ? Math.max(...existing.map(it => Number(it.sort_order || 0))) + 1
+    : 0;
+
+  const deriveSubgoalsFromRoadmap = (goal) => {
+    const roadmap = Array.isArray(goal?.roadmap) ? goal.roadmap.map(v => String(v || '').trim()).filter(Boolean) : [];
+    if (!roadmap.length) return [];
+    return roadmap.map((step, idx) => ({
+      title: `Phase ${idx + 1}`,
+      description: step,
+      roadmap: [step],
+      instruction_steps: [],
+      daily_plan: [],
+      time_commitment_hours: 0,
+      target_date_hint: '',
+    }));
+  };
+
   for (const g of goals) {
     const title = String(g.title || '').trim();
     if (!title) {
@@ -1210,7 +1231,9 @@ async function createResearchLTO(sectionKey, options = {}) {
     if (shopping.length) detailBits.push('Shopping List:\n- ' + shopping.join('\n- '));
     if (contextNotes.length) detailBits.push('Context Notes:\n- ' + contextNotes.join('\n- '));
 
-    const subgoals = Array.isArray(g.subgoals) ? g.subgoals : [];
+    const subgoals = (Array.isArray(g.subgoals) && g.subgoals.length)
+      ? g.subgoals
+      : deriveSubgoalsFromRoadmap(g);
     if (subgoals.length) {
       // Insert a visual group header so subgoals render as a roadmap section.
       const headerRes = await api('custom/' + sectionKey, {
@@ -1220,6 +1243,7 @@ async function createResearchLTO(sectionKey, options = {}) {
           status_id: Number(status.id),
           notes: 'AI-generated subgoal roadmap section',
           is_long_term_objective: 0,
+          sort_order: nextSortOrder++,
         },
       });
       if (apiHasError(headerRes)) failed += 1;
@@ -1254,6 +1278,7 @@ async function createResearchLTO(sectionKey, options = {}) {
             status_id: Number(status.id),
             notes: sgBits.join('\n\n'),
             is_long_term_objective: 1,
+            sort_order: nextSortOrder++,
           },
         });
         if (apiHasError(resSub)) failed += 1;
@@ -1269,6 +1294,7 @@ async function createResearchLTO(sectionKey, options = {}) {
         status_id: Number(status.id),
         notes: detailBits.join('\n\n'),
         is_long_term_objective: 1,
+        sort_order: nextSortOrder++,
       },
     });
     if (apiHasError(res)) failed += 1;
