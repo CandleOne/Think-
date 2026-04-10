@@ -1498,7 +1498,7 @@ def get_schedule():
 @app.route('/api/ai/status')
 def ai_status():
     runtime = get_ai_runtime_info()
-    has_search = bool(os.environ.get('TAVILY_AP'))
+    has_search = bool(os.environ.get('TAVILY_API_KEY'))
     return jsonify({
         'ok': True,
         'provider': runtime['provider'],
@@ -1538,6 +1538,23 @@ def ai_research():
         db.close()
 
     result = research_and_create_goals(topic, life_area_name=life_area_name, token_limit=token_limit)
+
+    def _fmt_list(title, items):
+        vals = [str(x).strip() for x in (items or []) if str(x).strip()]
+        if not vals:
+            return ''
+        return f"\n\n{title}:\n" + "\n".join(f"- {v}" for v in vals)
+
+    def _compose_goal_description(goal_obj, topic_name):
+        base = str(goal_obj.get('description') or '').strip()
+        text = base or 'Actionable roadmap generated from research.'
+        text += _fmt_list('Roadmap', goal_obj.get('roadmap'))
+        text += _fmt_list('Execution Instructions', goal_obj.get('instruction_steps'))
+        text += _fmt_list('Prerequisites', goal_obj.get('prerequisites'))
+        text += _fmt_list('Shopping List', goal_obj.get('shopping_list'))
+        text += _fmt_list('Context Notes', goal_obj.get('context_notes'))
+        text += f"\n\nSource topic: {topic_name}"
+        return text
 
     created_goals = []
     if create_goals and result.get('goals'):
@@ -1580,7 +1597,7 @@ def ai_research():
                     '''INSERT INTO goals (life_area_id, title, description, target_date, priority,
                        difficulty, time_commitment_hours, ai_priority_score, ai_reasoning)
                        VALUES (?,?,?,?,?,?,?,?,?)''',
-                    (area_id, g['title'], g.get('description', ''),
+                    (area_id, g['title'], _compose_goal_description(g, topic),
                      target_date, g.get('priority', 3),
                      g.get('difficulty', 5), g.get('time_commitment_hours', 0),
                      g.get('priority', 3), f"Auto-created from research: {topic}")

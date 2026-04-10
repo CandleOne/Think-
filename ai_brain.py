@@ -747,6 +747,41 @@ def _heuristic_research_goals(
         if src_snippet:
             description += f" Reference insight: {src_snippet[:220]}"
 
+        roadmap = [
+            f"Week 1: {milestone}",
+            "Week 2: Execute daily/weekly repetitions and capture metrics",
+            "Week 3: Review blockers and adjust methods",
+            "Week 4+: Consolidate into a repeatable system",
+        ]
+
+        instruction_steps = [
+            "Define a concrete output for this phase before starting",
+            "Time-block focused sessions and log completion",
+            "Do one deliberate-practice rep after each session",
+            "Run a weekly review and update the next actions",
+        ]
+
+        prerequisites = [
+            f"Baseline familiarity with {clean_topic}",
+            "A weekly schedule with at least 3 focused sessions",
+            "A tracking method (notes app, sheet, or journal)",
+        ]
+
+        shopping_list: list[str] = []
+        topic_l = clean_topic.lower()
+        if any(k in topic_l for k in ["sushi", "cook", "kitchen", "food"]):
+            shopping_list = [
+                "Core tools/equipment needed for practice",
+                "Primary materials/ingredients for 2-3 sessions",
+                "Storage and cleanup supplies",
+            ]
+
+        context_notes = [
+            f"Optimize for {area} constraints and available time",
+            "Prefer measurable milestones over vague progress",
+            "If blocked for 2+ sessions, reduce scope and keep cadence",
+        ]
+
         goals.append({
             "title": title,
             "description": description,
@@ -754,9 +789,75 @@ def _heuristic_research_goals(
             "difficulty": min(10, 4 + i),
             "time_commitment_hours": float(hour_est[i]),
             "target_date_hint": timeline[i],
+            "roadmap": roadmap,
+            "instruction_steps": instruction_steps,
+            "prerequisites": prerequisites,
+            "shopping_list": shopping_list,
+            "context_notes": context_notes,
         })
 
     return goals
+
+
+def _to_string_list(value: Any, max_items: int = 8) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text:
+            out.append(text)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _normalize_research_goal(goal: dict[str, Any], topic: str, life_area_name: str | None = None) -> dict[str, Any] | None:
+    title = str(goal.get("title") or "").strip()
+    if not title:
+        return None
+
+    description = str(goal.get("description") or "").strip()
+    priority = min(5, max(1, int(goal.get("priority") or 3)))
+    difficulty = min(10, max(1, int(goal.get("difficulty") or 5)))
+    hours = max(0, float(goal.get("time_commitment_hours") or 0))
+    target = str(goal.get("target_date_hint") or "").strip()
+
+    roadmap = _to_string_list(goal.get("roadmap"), max_items=8)
+    instruction_steps = _to_string_list(goal.get("instruction_steps"), max_items=10)
+    prerequisites = _to_string_list(goal.get("prerequisites"), max_items=8)
+    shopping_list = _to_string_list(goal.get("shopping_list"), max_items=12)
+    context_notes = _to_string_list(goal.get("context_notes"), max_items=8)
+
+    if not instruction_steps and roadmap:
+        instruction_steps = [f"Execute: {step}" for step in roadmap[:4]]
+    if not roadmap and instruction_steps:
+        roadmap = [f"Step {i+1}: {step}" for i, step in enumerate(instruction_steps[:4])]
+    if not prerequisites:
+        prerequisites = [
+            f"Baseline understanding of {topic}",
+            "A weekly execution window and progress tracker",
+        ]
+    if not context_notes:
+        area = str(life_area_name or "General").strip() or "General"
+        context_notes = [
+            f"Tailor execution to {area} priorities",
+            "Keep scope small enough for consistent weekly completion",
+        ]
+
+    return {
+        "title": title,
+        "description": description,
+        "priority": priority,
+        "difficulty": difficulty,
+        "time_commitment_hours": hours,
+        "target_date_hint": target,
+        "roadmap": roadmap,
+        "instruction_steps": instruction_steps,
+        "prerequisites": prerequisites,
+        "shopping_list": shopping_list,
+        "context_notes": context_notes,
+    }
 
 
 def research_and_create_goals(
@@ -767,7 +868,9 @@ def research_and_create_goals(
     """Search the web for a topic, feed results to AI, and return goal suggestions.
 
     Returns {mode, search_results, analysis, goals[]}.
-    Each goal: {title, description, priority, difficulty, time_commitment_hours, target_date_hint}.
+    Each goal includes strategy metadata for execution:
+    {title, description, priority, difficulty, time_commitment_hours, target_date_hint,
+     roadmap[], instruction_steps[], prerequisites[], shopping_list[], context_notes[]}.
     """
     clean_topic = str(topic or "").strip()
     if not clean_topic:
@@ -799,6 +902,11 @@ def research_and_create_goals(
         '    "difficulty": integer 1-10\n'
         '    "time_commitment_hours": number — estimated total hours\n'
         '    "target_date_hint": string — relative timeline like "2 weeks", "1 month", "3 months"\n'
+        '    "roadmap": array of 3-6 concrete milestone steps\n'
+        '    "instruction_steps": array of specific instructions to execute this goal\n'
+        '    "prerequisites": array of prerequisite knowledge/dependencies\n'
+        '    "shopping_list": array of required tools/materials (empty array if none)\n'
+        '    "context_notes": array of caveats/tips/constraints important for this topic\n'
         "Propose 3-6 goals that are specific, measurable, and build on each other."
     )
 
@@ -821,17 +929,9 @@ def research_and_create_goals(
         for g in raw_goals:
             if not isinstance(g, dict):
                 continue
-            title = str(g.get("title") or "").strip()
-            if not title:
-                continue
-            goals.append({
-                "title": title,
-                "description": str(g.get("description") or "").strip(),
-                "priority": min(5, max(1, int(g.get("priority") or 3))),
-                "difficulty": min(10, max(1, int(g.get("difficulty") or 5))),
-                "time_commitment_hours": max(0, float(g.get("time_commitment_hours") or 0)),
-                "target_date_hint": str(g.get("target_date_hint") or "").strip(),
-            })
+            normalized = _normalize_research_goal(g, clean_topic, life_area_name=life_area_name)
+            if normalized:
+                goals.append(normalized)
         if analysis or goals:
             return {
                 "mode": provider,

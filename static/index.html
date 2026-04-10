@@ -956,6 +956,16 @@ async function sendResearch() {
   const suggestedGoals = res.suggested_goals || [];
   const createdGoals = res.created_goals || [];
 
+  const toList = (value) => Array.isArray(value)
+    ? value.map(v => String(v || '').trim()).filter(Boolean)
+    : [];
+
+  const renderDetailList = (label, items) => {
+    const vals = toList(items);
+    if (!vals.length) return '';
+    return `<div class="rg-desc" style="margin-top:8px"><strong>${esc(label)}:</strong><ul style="margin:6px 0 0 18px">${vals.map(v => `<li>${esc(v)}</li>`).join('')}</ul></div>`;
+  };
+
   let html = '';
 
   // Search results
@@ -986,6 +996,11 @@ async function sendResearch() {
           <div class="rg-body">
             <div class="rg-title">${created ? '✅' : '💡'} ${esc(g.title)}</div>
             <div class="rg-desc">${esc(g.description)}</div>
+            ${renderDetailList('Roadmap', g.roadmap)}
+            ${renderDetailList('Execution Instructions', g.instruction_steps)}
+            ${renderDetailList('Prerequisites', g.prerequisites)}
+            ${renderDetailList('Shopping List', g.shopping_list)}
+            ${renderDetailList('Context Notes', g.context_notes)}
             <div class="rg-tags">
               <span class="rg-tag">Priority: ${g.priority}/5</span>
               <span class="rg-tag">Difficulty: ${g.difficulty}/10</span>
@@ -1162,6 +1177,16 @@ async function createResearchLTO(sectionKey, options = {}) {
     detailBits.push(`Source topic: ${window._lastResearchTopic || 'Research'}`);
     if (g.target_date_hint) detailBits.push(`Target hint: ${g.target_date_hint}`);
     if (g.time_commitment_hours) detailBits.push(`Estimated hours: ${g.time_commitment_hours}`);
+    const roadmap = Array.isArray(g.roadmap) ? g.roadmap.map(v => String(v || '').trim()).filter(Boolean) : [];
+    const instructions = Array.isArray(g.instruction_steps) ? g.instruction_steps.map(v => String(v || '').trim()).filter(Boolean) : [];
+    const prereqs = Array.isArray(g.prerequisites) ? g.prerequisites.map(v => String(v || '').trim()).filter(Boolean) : [];
+    const shopping = Array.isArray(g.shopping_list) ? g.shopping_list.map(v => String(v || '').trim()).filter(Boolean) : [];
+    const contextNotes = Array.isArray(g.context_notes) ? g.context_notes.map(v => String(v || '').trim()).filter(Boolean) : [];
+    if (roadmap.length) detailBits.push('Roadmap:\n- ' + roadmap.join('\n- '));
+    if (instructions.length) detailBits.push('Execution Instructions:\n- ' + instructions.join('\n- '));
+    if (prereqs.length) detailBits.push('Prerequisites:\n- ' + prereqs.join('\n- '));
+    if (shopping.length) detailBits.push('Shopping List:\n- ' + shopping.join('\n- '));
+    if (contextNotes.length) detailBits.push('Context Notes:\n- ' + contextNotes.join('\n- '));
 
     const res = await api('custom/' + sectionKey, {
       method: 'POST',
