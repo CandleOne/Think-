@@ -4,6 +4,7 @@ Flask backend serving API + frontend for managing the life optimization database
 """
 import sqlite3
 import os
+from datetime import date
 from flask import Flask, request, jsonify, send_from_directory
 
 
@@ -201,6 +202,16 @@ def row_to_dict(row):
 
 def rows_to_list(rows):
     return [dict(r) for r in rows]
+
+
+def parse_iso_date(value):
+    """Parse a YYYY-MM-DD string into a date; return None on invalid values."""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 def api_error(message, status=400):
@@ -1160,6 +1171,309 @@ def get_all_purchases():
     rows = db.execute('SELECT * FROM v_all_purchases').fetchall()
     db.close()
     return jsonify(rows_to_list(rows))
+
+
+@app.route('/api/insights/overview', methods=['GET'])
+def get_insights_overview():
+    """Return high-level progress and urgency metrics for the dashboard."""
+    try:
+        window_days = int(request.args.get('window_days', 14) or 14)
+    except (TypeError, ValueError):
+        window_days = 14
+    window_days = max(1, min(90, window_days))
+
+    today = date.today()
+    db = get_db()
+    try:
+        purchases = rows_to_list(db.execute('SELECT status_color FROM v_all_purchases').fetchall())
+        goals = rows_to_list(db.execute('''
+            SELECT g.id, g.title, g.target_date, g.is_completed, g.priority, la.name as area_name
+            FROM goals g
+            JOIN life_areas la ON g.life_area_id = la.id
+            ORDER BY g.priority DESC, g.title
+        ''').fetchall())
+        tasks = rows_to_list(db.execute('''
+            SELECT t.id, t.title, t.due_date, t.is_completed, la.name as area_name
+            FROM tasks t
+            JOIN life_areas la ON t.life_area_id = la.id
+            ORDER BY t.due_date, t.title
+        ''').fetchall())
+        lto_items = rows_to_list(db.execute('''
+            SELECT ci.id, ci.name, ci.notes, ci.objective_completed, ci.sort_order,
+                   ci.task_count, ci.sessions_completed, ci.section_key,
+                   ss.label as section_label
+            FROM custom_items ci
+            JOIN sidebar_sections ss ON ss.page_key = ci.section_key
+            WHERE COALESCE(ci.is_long_term_objective, 0) = 1
+            ORDER BY ci.section_key, ci.sort_order, ci.id
+        ''').fetchall())
+    finally:
+        db.close()
+
+    purchase_counts = {'green': 0, 'blue': 0, 'orange': 0, 'red': 0}
+    for row in purchases:
+        color = str(row.get('status_color') or '').lower()
+        if color in purchase_counts:
+            purchase_counts[color] += 1
+
+    goal_total = len(goals)
+    goal_completed = sum(1 for g in goals if int(g.get('is_completed') or 0) == 1)
+    task_total = len(tasks)
+    task_completed = sum(1 for t in tasks if int(t.get('is_completed') or 0) == 1)
+
+    overdue_goals = 0
+    upcoming_goals = 0
+    overdue_tasks = 0
+    upcoming_tasks = 0
+    focus_items = []
+
+    for g in goals:
+        if int(g.get('is_completed') or 0):
+            continue
+        target = parse_iso_date(g.get('target_date'))
+        if not target:
+            continue
+        days = (target - today).days
+        if days < 0:
+            overdue_goals += 1
+            focus_items.append({
+                'source': 'goal',
+                'id': g['id'],
+                'title': g['title'],
+                'area_name': g.get('area_name'),
+                'due_date': target.isoformat(),
+                'days_to_due': days,
+                'urgency': 'overdue',
+            })
+        elif days <= window_days:
+            upcoming_goals += 1
+            focus_items.append({
+                'source': 'goal',
+                'id': g['id'],
+                'title': g['title'],
+                'area_name': g.get('area_name'),
+                'due_date': target.isoformat(),
+                'days_to_due': days,
+                'urgency': 'upcoming',
+            })
+
+    for t in tasks:
+        if int(t.get('is_completed') or 0):
+            continue
+        due = parse_iso_date(t.get('due_date'))
+        if not due:
+            continue
+        days = (due - today).days
+        if days < 0:
+            overdue_tasks += 1
+            focus_items.append({
+                'source': 'task',
+                'id': t['id'],
+                'title': t['title'],
+                'area_name': t.get('area_name'),
+                'due_date': due.isoformat(),
+                'days_to_due': days,
+                'urgency': 'overdue',
+            })
+        elif days <= window_days:
+            upcoming_tasks += 1
+            focus_items.append({
+                'source': 'task',
+                'id': t['id'],
+                'title': t['title'],
+                'area_name': t.get('area_name'),
+                'due_date': due.isoformat(),
+                'days_to_due': days,
+                'urgency': 'upcoming',
+            })
+
+    lto_by_section = {}
+    for item in lto_items:
+        lto_by_section.setdefault(item.get('section_key') or '', []).append(item)
+
+    for section_items in lto_by_section.values():
+        first_incomplete_seen = False
+        for item in section_items:
+            done = int(item.get('objective_completed') or 0) == 1
+            if done:
+                continue
+            if first_incomplete_seen:
+                # Later long-term objectives are blocked by earlier incomplete ones.
+                continue
+            first_incomplete_seen = True
+            sessions_required = int(item.get('task_count') or 0) or parse_lto_sessions(
+                item.get('name', ''), item.get('notes', '')
+            )
+            sessions_completed = int(item.get('sessions_completed') or 0)
+            focus_items.append({
+                'source': 'long_term_objective',
+                'id': item['id'],
+                'title': item.get('name'),
+                'area_name': item.get('section_label'),
+                'sessions_required': sessions_required,
+                'sessions_completed': sessions_completed,
+                'urgency': 'long_term',
+            })
+
+    urgency_rank = {'overdue': 0, 'upcoming': 1, 'long_term': 2}
+    focus_items.sort(key=lambda x: (
+        urgency_rank.get(str(x.get('urgency') or ''), 9),
+        int(x.get('days_to_due') or 9999),
+        str(x.get('title') or '').lower(),
+    ))
+
+    return jsonify({
+        'ok': True,
+        'generated_at': today.isoformat(),
+        'window_days': window_days,
+        'purchases': {
+            'total': len(purchases),
+            **purchase_counts,
+        },
+        'goals': {
+            'total': goal_total,
+            'completed': goal_completed,
+            'active': goal_total - goal_completed,
+            'overdue': overdue_goals,
+            'upcoming': upcoming_goals,
+        },
+        'tasks': {
+            'total': task_total,
+            'completed': task_completed,
+            'open': task_total - task_completed,
+            'overdue': overdue_tasks,
+            'upcoming': upcoming_tasks,
+        },
+        'completion_rates': {
+            'goals': round((goal_completed / goal_total) * 100, 1) if goal_total else 0.0,
+            'tasks': round((task_completed / task_total) * 100, 1) if task_total else 0.0,
+        },
+        'focus_items': focus_items[:12],
+    })
+
+
+@app.route('/api/search', methods=['GET'])
+def search_all_items():
+    """Global fuzzy search across goals, tasks, purchases, and custom sections."""
+    query = str(request.args.get('q') or '').strip()
+    if len(query) < 2:
+        return api_error('q must be at least 2 characters', 400)
+
+    try:
+        limit = int(request.args.get('limit', 40) or 40)
+    except (TypeError, ValueError):
+        limit = 40
+    limit = max(1, min(100, limit))
+
+    like = f"%{query.lower()}%"
+    db = get_db()
+    results = []
+    try:
+        results.extend(rows_to_list(db.execute('''
+            SELECT 'goal' AS source, g.id AS item_id, g.title AS title,
+                   COALESCE(la.name, '') AS subtitle, 'goals' AS page_key,
+                   NULL AS section_key
+            FROM goals g
+            LEFT JOIN life_areas la ON la.id = g.life_area_id
+            WHERE LOWER(g.title) LIKE ? OR LOWER(COALESCE(g.description, '')) LIKE ?
+            LIMIT 50
+        ''', (like, like)).fetchall()))
+
+        results.extend(rows_to_list(db.execute('''
+            SELECT 'task' AS source, t.id AS item_id, t.title AS title,
+                   COALESCE(la.name, '') AS subtitle, 'tasks' AS page_key,
+                   NULL AS section_key
+            FROM tasks t
+            LEFT JOIN life_areas la ON la.id = t.life_area_id
+            WHERE LOWER(t.title) LIKE ? OR LOWER(COALESCE(t.description, '')) LIKE ?
+            LIMIT 50
+        ''', (like, like)).fetchall()))
+
+        results.extend(rows_to_list(db.execute('''
+            SELECT 'custom' AS source, ci.id AS item_id, ci.name AS title,
+                   COALESCE(ss.label, ci.section_key) AS subtitle,
+                   COALESCE(ci.section_key, 'dashboard') AS page_key,
+                   ci.section_key AS section_key
+            FROM custom_items ci
+            LEFT JOIN sidebar_sections ss ON ss.page_key = ci.section_key
+            WHERE LOWER(ci.name) LIKE ? OR LOWER(COALESCE(ci.notes, '')) LIKE ?
+            LIMIT 80
+        ''', (like, like)).fetchall()))
+
+        results.extend(rows_to_list(db.execute('''
+            SELECT 'purchase' AS source, v.item_id AS item_id, v.name AS title,
+                   COALESCE(v.category, v.item_type, 'Purchases') AS subtitle,
+                   'purchases' AS page_key, NULL AS section_key
+            FROM v_all_purchases v
+            WHERE LOWER(v.name) LIKE ?
+               OR LOWER(COALESCE(v.category, '')) LIKE ?
+               OR LOWER(COALESCE(v.item_type, '')) LIKE ?
+            LIMIT 80
+        ''', (like, like, like)).fetchall()))
+
+        results.extend(rows_to_list(db.execute('''
+            SELECT 'fashion' AS source, f.id AS item_id, f.name AS title,
+                   COALESCE(fc.name, 'Fashion') AS subtitle,
+                   'fashion' AS page_key, NULL AS section_key
+            FROM fashion_items f
+            LEFT JOIN fashion_categories fc ON fc.id = f.category_id
+            WHERE LOWER(f.name) LIKE ? OR LOWER(COALESCE(f.notes, '')) LIKE ?
+            LIMIT 40
+        ''', (like, like)).fetchall()))
+
+        results.extend(rows_to_list(db.execute('''
+            SELECT 'skincare' AS source, sp.id AS item_id, sp.name AS title,
+                   COALESCE(sr.name, 'Skincare') AS subtitle,
+                   'skincare' AS page_key, NULL AS section_key
+            FROM skincare_products sp
+            LEFT JOIN skincare_routines sr ON sr.id = sp.routine_id
+            WHERE LOWER(sp.name) LIKE ? OR LOWER(COALESCE(sp.notes, '')) LIKE ?
+            LIMIT 40
+        ''', (like, like)).fetchall()))
+
+        results.extend(rows_to_list(db.execute('''
+            SELECT 'pharmacology' AS source, p.id AS item_id, p.name AS title,
+                   COALESCE(p.dosage, 'Pharmacology') AS subtitle,
+                   'pharmacology' AS page_key, NULL AS section_key
+            FROM pharmacology_items p
+            WHERE LOWER(p.name) LIKE ? OR LOWER(COALESCE(p.notes, '')) LIKE ?
+            LIMIT 40
+        ''', (like, like)).fetchall()))
+
+        results.extend(rows_to_list(db.execute('''
+            SELECT 'misc' AS source, m.id AS item_id, m.name AS title,
+                   COALESCE(m.category, 'Misc') AS subtitle,
+                   'misc' AS page_key, NULL AS section_key
+            FROM misc_items m
+            WHERE LOWER(m.name) LIKE ? OR LOWER(COALESCE(m.notes, '')) LIKE ?
+            LIMIT 40
+        ''', (like, like)).fetchall()))
+    finally:
+        db.close()
+
+    q = query.lower()
+
+    def rank(item):
+        title = str(item.get('title') or '').lower()
+        subtitle = str(item.get('subtitle') or '').lower()
+        if title == q:
+            return (0, title)
+        if title.startswith(q):
+            return (1, title)
+        if q in title:
+            return (2, title)
+        if q in subtitle:
+            return (3, title)
+        return (4, title)
+
+    results.sort(key=rank)
+    trimmed = results[:limit]
+    return jsonify({
+        'ok': True,
+        'query': query,
+        'count': len(trimmed),
+        'results': trimmed,
+    })
 
 
 # ── Sidebar Sections ─────────────────────────────────────

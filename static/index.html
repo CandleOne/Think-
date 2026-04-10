@@ -392,6 +392,24 @@ a:hover { text-decoration: underline; }
 .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
 .stat-value { font-size: 32px; font-weight: 700; }
 .stat-label { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+.dashboard-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.dashboard-focus-item { border: 1px solid var(--border); border-radius: 8px; background: var(--surface2); padding: 10px 12px; margin-bottom: 8px; }
+.dashboard-focus-title { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+.dashboard-focus-meta { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.focus-tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; }
+.focus-tag.overdue { color: var(--red); border-color: var(--red); }
+.focus-tag.upcoming { color: var(--orange); border-color: var(--orange); }
+.focus-tag.long_term { color: var(--blue); border-color: var(--blue); }
+.dashboard-search-wrap { margin-bottom: 14px; }
+.dashboard-search-input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px; }
+.dashboard-search-results { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dashboard-search-item { border: 1px solid var(--border); border-radius: 8px; background: var(--surface2); padding: 9px 11px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.dashboard-search-item:hover { border-color: var(--accent); background: rgba(88,166,255,0.08); }
+.dashboard-search-title { font-size: 13px; font-weight: 600; }
+.dashboard-search-meta { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+@media (max-width: 980px) {
+  .dashboard-grid { grid-template-columns: 1fr; }
+}
 
 /* Empty state */
 .empty-state { text-align: center; padding: 40px; color: var(--text-muted); font-size: 14px; }
@@ -486,6 +504,7 @@ let currentPage = 'dashboard';
 let loadFailures = {};
 let aiChatHistory = [];
 let aiStatusInfo = null;
+let dashboardSearchTimer = null;
 const loadBannerPrefKey = 'lifeopt_load_banner_expanded';
 let loadBannerExpanded = localStorage.getItem(loadBannerPrefKey) === '1';
 
@@ -1582,17 +1601,46 @@ async function optimizeTaskFromModal(sectionKey, id) {
 
 // ── Dashboard ──
 async function renderDashboard(c) {
-  const [fashion, skincare, pharma, goals, purchases] = await Promise.all([
+  const [fashion, skincare, pharma, goals, purchases, insightsRes] = await Promise.all([
     getList('fashion', 'Failed to load fashion'),
     getList('skincare', 'Failed to load skincare'),
     getList('pharmacology', 'Failed to load pharmacology'),
     getList('goals', 'Failed to load goals'),
-    getList('purchases', 'Failed to load purchases')
+    getList('purchases', 'Failed to load purchases'),
+    api('insights/overview?window_days=14')
   ]);
+  const insights = apiHasError(insightsRes) ? null : insightsRes;
   const owned = purchases.filter(p => p.status_color === 'green').length;
   const toBuy = purchases.filter(p => p.status_color === 'blue').length;
   const eventual = purchases.filter(p => p.status_color === 'orange').length;
   const replace = purchases.filter(p => p.status_color === 'red').length;
+  const focusItems = Array.isArray(insights?.focus_items) ? insights.focus_items : [];
+  const completionGoals = Number(insights?.completion_rates?.goals || 0);
+  const completionTasks = Number(insights?.completion_rates?.tasks || 0);
+
+  function focusTagLabel(item) {
+    const urgency = String(item?.urgency || '').toLowerCase();
+    if (urgency === 'overdue') return 'Overdue';
+    if (urgency === 'upcoming') return 'Upcoming';
+    return 'Long Term';
+  }
+
+  function focusDetail(item) {
+    if (item.source === 'long_term_objective') {
+      const done = Number(item.sessions_completed || 0);
+      const req = Number(item.sessions_required || 0);
+      return `${done}/${req || '?'} sessions`;
+    }
+    if (item.due_date) {
+      const days = Number(item.days_to_due);
+      if (Number.isFinite(days)) {
+        if (days < 0) return `${Math.abs(days)} day(s) late`;
+        return `Due in ${days} day(s)`;
+      }
+      return `Due ${item.due_date}`;
+    }
+    return item.area_name || '';
+  }
 
   c.innerHTML = `
     <div class="page-header"><h2>Dashboard</h2></div>
@@ -1614,6 +1662,39 @@ async function renderDashboard(c) {
       <div class="stat-card"><div class="stat-value">${pharma.length}</div><div class="stat-label">Pharmacology</div></div>
       <div class="stat-card"><div class="stat-value">${goals.length}</div><div class="stat-label">Goals</div></div>
     </div>
+    <div class="dashboard-grid">
+      <div class="card">
+        <h3>Focus Queue (14 Days)</h3>
+        <div class="card-subtitle">Prioritized from goals, tasks, and long-term objectives.</div>
+        ${focusItems.slice(0, 8).map(item => `
+          <div class="dashboard-focus-item">
+            <div class="dashboard-focus-title">${esc(item.title || '')}</div>
+            <div class="dashboard-focus-meta">
+              <span class="focus-tag ${esc(String(item.urgency || '').toLowerCase())}">${focusTagLabel(item)}</span>
+              ${item.area_name ? `<span>${esc(item.area_name)}</span>` : ''}
+              <span>${esc(focusDetail(item))}</span>
+            </div>
+          </div>
+        `).join('')}
+        ${focusItems.length === 0 ? '<div class="empty-state">No urgent items in this window.</div>' : ''}
+      </div>
+      <div class="card">
+        <h3>Execution Health</h3>
+        <div class="card-subtitle">Live completion rates from tracked goals and tasks.</div>
+        <div class="stats" style="margin-bottom:10px;">
+          <div class="stat-card"><div class="stat-value">${completionGoals.toFixed(1)}%</div><div class="stat-label">Goal Completion</div></div>
+          <div class="stat-card"><div class="stat-value">${completionTasks.toFixed(1)}%</div><div class="stat-label">Task Completion</div></div>
+        </div>
+        <div class="dashboard-focus-meta" style="padding:4px 0 8px;">
+          <span>Overdue goals: <strong>${Number(insights?.goals?.overdue || 0)}</strong></span>
+          <span>Overdue tasks: <strong>${Number(insights?.tasks?.overdue || 0)}</strong></span>
+        </div>
+        <div class="dashboard-search-wrap">
+          <input id="dashboard-search-input" class="dashboard-search-input" type="text" placeholder="Search everything (goals, tasks, custom, purchases...)" oninput="queueDashboardSearch()" />
+          <div id="dashboard-search-results" class="dashboard-search-results"></div>
+        </div>
+      </div>
+    </div>
     <div class="card">
       <h3>Recent Items</h3>
       <ul class="item-list">
@@ -1628,6 +1709,46 @@ async function renderDashboard(c) {
       </ul>
       ${purchases.length === 0 ? '<div class="empty-state">No items yet. Add some from the sidebar!</div>' : ''}
     </div>`;
+
+  if (!insights) {
+    toast('Insights endpoint unavailable, showing baseline dashboard only.');
+  }
+}
+
+function queueDashboardSearch() {
+  if (dashboardSearchTimer) clearTimeout(dashboardSearchTimer);
+  dashboardSearchTimer = setTimeout(dashboardSearch, 220);
+}
+
+async function dashboardSearch() {
+  const input = document.getElementById('dashboard-search-input');
+  const out = document.getElementById('dashboard-search-results');
+  if (!input || !out) return;
+
+  const q = (input.value || '').trim();
+  if (q.length < 2) {
+    out.innerHTML = q.length === 0 ? '' : '<div class="empty-state" style="padding:8px 0;">Type at least 2 characters.</div>';
+    return;
+  }
+
+  const res = await api('search?q=' + encodeURIComponent(q) + '&limit=8');
+  if (apiHasError(res)) {
+    out.innerHTML = `<div class="empty-state" style="padding:8px 0;">${esc(res.error || 'Search failed')}</div>`;
+    return;
+  }
+
+  const results = Array.isArray(res.results) ? res.results : [];
+  if (results.length === 0) {
+    out.innerHTML = '<div class="empty-state" style="padding:8px 0;">No matches found.</div>';
+    return;
+  }
+
+  out.innerHTML = results.map(r => `
+    <div class="dashboard-search-item" onclick="navigateTo('${esc(r.page_key || 'dashboard')}')">
+      <div class="dashboard-search-title">${esc(r.title || '')}</div>
+      <div class="dashboard-search-meta">${esc(r.source || '')}${r.subtitle ? ' • ' + esc(r.subtitle) : ''}</div>
+    </div>
+  `).join('');
 }
 
 // ── All Purchases ──
