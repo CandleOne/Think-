@@ -1498,7 +1498,7 @@ def get_schedule():
 @app.route('/api/ai/status')
 def ai_status():
     runtime = get_ai_runtime_info()
-    has_search = bool(os.environ.get('TAVILY_API_KEY'))
+    has_search = bool(os.environ.get('TAVILY_AP'))
     return jsonify({
         'ok': True,
         'provider': runtime['provider'],
